@@ -14,7 +14,7 @@ window.__ModuleLoader__.load({
       frozen: 'paused', 'per.day': '/day', 'per.week': '/week', 'per.month': '/month',
       defaults: 'Default wage', quick: 'Per tip/fine',
       override: 'Own wage', useDefault: 'Use default', ownQuick: 'Own amount',      save: 'Save',
-      note: 'Balance starts one wage in debt: the first payday is what clears it. Token fees come out of the balance. An employee paused for a full period earns nothing until it works again.',
+      note: 'Balance opens one period in the red: the first payday is what brings it to zero. Token fees come out of the balance. An employee paused for a full period earns nothing until it works again.',
     }
     const zh = {
       panel: '员工',
@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
       defaults: '默认工资', quick: '每次打赏/罚款',
       override: '单独工资', useDefault: '用默认', ownQuick: '单独额度',
       save: '保存',
-      note: '入职时先欠一期工资，第一次发薪后转正。token 费用从余额里扣。停摆满一个发薪周期的员工暂停发薪，再干活才恢复。',
+      note: '入职时余额是一期工资的负数：这段是负债工作，干满一期、第一次发薪后归零转正。token 费用从余额里扣。停摆满一个发薪周期的员工暂停发薪，再干活才恢复。',
     }
 
     const NS = 'iAmBoss'

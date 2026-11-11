@@ -1,6 +1,6 @@
 {
   "name": "i-am-boss-dsh",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "private": false,
   "description": "把 DeepSeek Harness 里正在运行的 agent 当员工管理：按日/周/月发工资，按性价比打赏或罚款，token 费用从员工自己的工资里扣。",
   "type": "module",

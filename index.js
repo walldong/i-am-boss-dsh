@@ -166,7 +166,7 @@ function settle(ctx, ledger) {
   return present(ledger, ctx, now)
 }
 
-/** Joining puts the employee one period's wage in debt; payday is what clears it. */
+/** Joining starts the employee one period in the hole: it works off that advance before it is in the black. */
 function ensure(ledger, id, now) {
   if (!ledger.employees[id]) {
     const at = now.toISOString()
@@ -276,7 +276,7 @@ function describeStanding(employee) {
     `老板每次点打赏或罚款是 ${employee.verdictAmount.toFixed(2)} 元。`,
   ]
   if (employee.frozen) lines.push('你已停薪：整整一个发薪周期没有干活，工资暂停，开始工作后自动恢复。')
-  if (employee.balance < 0) lines.push('余额为负说明你还在还欠薪，第一次发薪后才会转正。')
+  if (employee.balance < 0) lines.push('余额为负说明你在负债工作：公司先预付了一期工资，干满这一期、拿到第一次发薪后归零转正。')
   lines.push('所以：用尽量少的 token 把活干对、干完，利润才会转正；反复试错和冗长输出都在烧你自己的钱。')
   return lines.join('\n')
 }
@@ -341,8 +341,8 @@ function load() {
     employee.verdictAmount ??= null
     employee.workedAt ??= 0
     employee.lastSeenAt ??= 0
-    // Records written before the debt rule carry a zero balance with no activity at all.
-    // Nothing was ever earned or spent, so the hire debt still stands.
+    // Records written before the advance rule carry a zero balance with no activity at all.
+    // Nothing was ever earned or spent, so the opening advance still stands.
     if (employee.balance === 0 && employee.tokenCost === 0 && employee.wageTotal === 0
       && employee.tipTotal === 0 && employee.fineTotal === 0) {
       employee.balance = money(-(employee.wage ?? data.settings.wage).amount)
