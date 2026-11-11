@@ -31,14 +31,15 @@ export function apply(ctx) {
 function bossTool(queue, ctx) {
   return {
     name: 'boss_payroll',
-    description: '员工名册、日/周/月工资、发薪、扣款。token 费用会自动从该员工余额扣除。action: list | set_wage | pay | deduct。',
+    description: '员工名册与工资体系。余额是员工的身价评分，越高越好。action: list | set_wage | pay | tip | fine（任务完成后按质量打赏 tip / 罚款 fine，note 写理由）。token 费用会自动从余额扣除。',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'set_wage', 'pay', 'deduct'] },
+        action: { type: 'string', enum: ['list', 'set_wage', 'pay', 'tip', 'fine'] },
         id: { type: 'string', description: '员工 id，即 agent id' },
         period: { type: 'string', enum: ['day', 'week', 'month'] },
-        amount: { type: 'number', description: '工资金额（元）或扣款金额（元）' },
+        amount: { type: 'number', description: '金额（元），必须大于 0' },
+        note: { type: 'string', description: '打赏或罚款的理由，比如「修好了登录 bug」' },
       },
       required: ['action'],
     },
@@ -74,9 +75,14 @@ function act(queue, ctx, args) {
       employee.wage = { period: args.period, amount: money(args.amount) }
     } else if (args.action === 'pay') {
       employee.balance = money(employee.balance + employee.wage.amount)
-    } else if (args.action === 'deduct') {
-      if (!(args.amount > 0)) return { error: '扣款金额要大于 0' }
-      employee.balance = money(employee.balance - args.amount)
+    } else if (args.action === 'tip' || args.action === 'fine') {
+      if (!(args.amount > 0)) return { error: '金额要大于 0' }
+      const sign = args.action === 'tip' ? 1 : -1
+      employee.balance = money(employee.balance + sign * args.amount)
+      employee[args.action === 'tip' ? 'tipTotal' : 'fineTotal'] = money(employee[args.action === 'tip' ? 'tipTotal' : 'fineTotal'] + args.amount)
+      employee.verdicts = [...(employee.verdicts || []), {
+        at: new Date().toISOString(), kind: args.action, amount: money(args.amount), note: String(args.note || ''),
+      }].slice(-20)
     } else {
       return { error: '未知操作' }
     }
@@ -116,6 +122,7 @@ function ensure(ledger, id, now) {
     ledger.employees[id] = {
       id, hiredAt: at, lastPaidAt: at, model: '',
       wage: { ...DEFAULT_WAGE }, balance: 0, tokenCost: 0, billed: null,
+      tipTotal: 0, fineTotal: 0, verdicts: [],
     }
   }
   return ledger.employees[id]
@@ -142,18 +149,20 @@ function present(ledger, live, now) {
     status: status.get(employee.id) || 'offline',
     nextPayAt: new Date(nextDue(Date.parse(employee.lastPaidAt), employee.wage.period)).toISOString(),
   }))
-  employees.sort((a, b) => rank(a.status) - rank(b.status) || a.id.localeCompare(b.id))
+  employees.sort((a, b) => b.balance - a.balance || a.id.localeCompare(b.id))
+  employees.forEach((employee, index) => { employee.rank = index + 1 })
   return { now: now.toISOString(), peak: isPeak(now), employees }
-}
-
-function rank(status) {
-  return status === 'running' ? 0 : status === 'idle' ? 1 : 2
 }
 
 function load() {
   if (!existsSync(LEDGER)) return { version: 1, employees: {} }
   const data = JSON.parse(readFileSync(LEDGER, 'utf8'))
   if (data.version !== 1 || !data.employees) throw new Error('账本损坏')
+  for (const employee of Object.values(data.employees)) {
+    employee.tipTotal ??= 0
+    employee.fineTotal ??= 0
+    employee.verdicts ??= []
+  }
   return data
 }
 

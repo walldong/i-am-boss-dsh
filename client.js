@@ -11,8 +11,11 @@ window.__ModuleLoader__.load({
       running: 'running', idle: 'idle', off: 'offline',
       peak: 'peak', offpeak: 'off-peak',
       miss: 'miss', hit: 'hit', write: 'write', out: 'out',
-      wage: 'Set wage', pay: 'Pay one period', deduct: 'Deduct',
-      note: 'Token fees come out of that employee’s balance. Usage before hire is not billed. Off-peak DeepSeek list prices, peak ×2.',
+      wage: 'Set wage', pay: 'Pay one period', tip: 'Tip', fine: 'Fine',
+      balance: 'Balance', score: 'Score',
+      verdicts: 'Verdicts', noteHint: 'Why? e.g. fixed the login bug',
+      amountFirst: 'Enter an amount first.',
+      note: 'Balance is the employee’s score: higher is better. Token fees come out of that balance, so a good agent has to earn it back. After a task, tip or fine it for the quality. Off-peak DeepSeek list prices, peak ×2.',
     }
     const zh = {
       panel: '员工',
@@ -22,8 +25,11 @@ window.__ModuleLoader__.load({
       running: '在跑', idle: '空闲', off: '离线',
       peak: '高峰', offpeak: '闲时',
       miss: '未命中', hit: '命中', write: '写出', out: '输出',
-      wage: '设工资', pay: '发一期', deduct: '扣款',
-      note: 'token 费用从该员工余额里扣。入职前的消耗不补扣。按 DeepSeek 闲时牌价，高峰 ×2。',
+      wage: '设工资', pay: '发一期', tip: '打赏', fine: '罚款',
+      balance: '余额', score: '身价',
+      verdicts: '奖惩记录', noteHint: '理由，例如「修好了登录 bug」',
+      amountFirst: '先填金额。',
+      note: '余额就是员工的身价评分，越高越好。token 费用从余额里扣，干得差的会被自己的消耗拖垮。任务跑完按质量打赏或罚款。入职前的消耗不补扣。按 DeepSeek 闲时牌价，高峰 ×2。',
     }
 
     function Page(props) {
@@ -44,7 +50,7 @@ window.__ModuleLoader__.load({
         const timer = setInterval(load, 5000)
         return () => clearInterval(timer)
       }, [load])
-      const rowDraft = (id, employee) => draft[id] || { period: employee.wage.period, amount: String(employee.wage.amount), deduct: '' }
+      const rowDraft = (id, employee) => draft[id] || { period: employee.wage.period, amount: String(employee.wage.amount), note: '' }
       const post = (body) => fetch('/i-am-boss/api', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
       }).then(async (res) => {
@@ -65,25 +71,42 @@ window.__ModuleLoader__.load({
           const form = rowDraft(employee.id, employee)
           const set = (patch) => setDraft({ ...draft, [employee.id]: { ...form, ...patch } })
           const tokens = employee.billed || {}
+          const verdict = (kind) => {
+            if (!(Number(form.amount) > 0)) return setError(t('amountFirst'))
+            post({ action: kind, id: employee.id, amount: Number(form.amount), note: form.note })
+          }
           return h('article', { key: employee.id, className: 'boss-card' },
             h('div', { className: 'boss-id' },
+              h('span', { className: 'boss-rank' }, `#${employee.rank}`),
               h('strong', null, employee.id),
               h('span', { className: `boss-${employee.status}` }, t(employee.status === 'offline' ? 'off' : employee.status)),
               employee.model && h('span', { className: 'boss-model' }, employee.model)),
+            h('div', { className: 'boss-score' },
+              h('span', { className: 'boss-label' }, t('balance')),
+              h('b', { className: employee.balance < 0 ? 'boss-debt' : '' }, yuan(employee.balance)),
+              h('span', { className: 'boss-delta' }, `tip +${yuan(employee.tipTotal)} / fine -${yuan(employee.fineTotal)}`)),
             h('dl', null,
               row('token', fmtTokens(tokens, t)),
               row('token ¥', yuan(employee.tokenCost)),
-              row('余额', yuan(employee.balance), employee.balance < 0),
               row('工资', `${yuan(employee.wage.amount)} / ${employee.wage.period}`),
               row('下次发薪', new Date(employee.nextPayAt).toLocaleString())),
             h('div', { className: 'boss-actions' },
-              h('select', { value: form.period, 'aria-label': 'period', onChange: (e) => set({ period: e.target.value }) },
-                ['day', 'week', 'month'].map((period) => h('option', { key: period, value: period }, period))),
-              h('input', { value: form.amount, 'aria-label': 'wage', inputMode: 'decimal', onChange: (e) => set({ amount: e.target.value }) }),
-              h('button', { type: 'button', onClick: () => post({ action: 'set_wage', id: employee.id, period: form.period, amount: Number(form.amount) }) }, t('wage')),
-              h('button', { type: 'button', onClick: () => post({ action: 'pay', id: employee.id }) }, t('pay')),
-              h('input', { value: form.deduct, 'aria-label': 'deduct', inputMode: 'decimal', onChange: (e) => set({ deduct: e.target.value }) }),
-              h('button', { type: 'button', className: 'boss-danger', onClick: () => post({ action: 'deduct', id: employee.id, amount: Number(form.deduct) }) }, t('deduct'))))
+              h('input', { value: form.amount, 'aria-label': 'amount', inputMode: 'decimal', placeholder: '0.00', onChange: (e) => set({ amount: e.target.value }) }),
+              h('input', { value: form.note, 'aria-label': 'note', className: 'boss-note-input', placeholder: t('noteHint'), onChange: (e) => set({ note: e.target.value }) }),
+              h('button', { type: 'button', onClick: () => verdict('tip') }, t('tip')),
+              h('button', { type: 'button', className: 'boss-danger', onClick: () => verdict('fine') }, t('fine'))),
+            h('details', { className: 'boss-actions-row' },
+              h('summary', null, t('wage')),
+              h('div', { className: 'boss-actions' },
+                h('select', { value: form.period, 'aria-label': 'period', onChange: (e) => set({ period: e.target.value }) },
+                  ['day', 'week', 'month'].map((period) => h('option', { key: period, value: period }, period))),
+                h('button', { type: 'button', onClick: () => post({ action: 'set_wage', id: employee.id, period: form.period, amount: Number(form.amount) }) }, t('wage')),
+                h('button', { type: 'button', onClick: () => post({ action: 'pay', id: employee.id }) }, t('pay')))),
+            (employee.verdicts || []).length > 0 && h('details', { className: 'boss-actions-row' },
+              h('summary', null, `${t('verdicts')} (${employee.verdicts.length})`),
+              h('ul', { className: 'boss-log' }, employee.verdicts.slice().reverse().map((item, index) => h('li', { key: index },
+                h('span', { className: item.kind === 'tip' ? 'boss-tip' : 'boss-debt' }, `${item.kind === 'tip' ? '+' : '-'}${yuan(item.amount)}`),
+                ` ${new Date(item.at).toLocaleString()}${item.note ? ` · ${item.note}` : ''}`)))))
         }))
     }
 
@@ -133,6 +156,16 @@ const css = `
 .boss-card { border: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
 .boss-id { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .boss-id strong { font-family: ui-monospace, monospace; font-size: 13px; overflow-wrap: anywhere; }
+.boss-rank { color: var(--dsw-alias-label-tertiary); font-family: ui-monospace, monospace; }
+.boss-score { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; }
+.boss-score b { font-size: 24px; font-variant-numeric: tabular-nums; }
+.boss-label { color: var(--dsw-alias-label-tertiary); }
+.boss-delta { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.boss-tip { color: var(--dsw-alias-state-business-primary); }
+.boss-actions-row { margin-top: 10px; }
+.boss-actions-row summary { cursor: pointer; color: var(--dsw-alias-label-secondary); }
+.boss-log { margin: 8px 0 0; padding-left: 18px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.boss-note-input { flex: 1 1 200px; }
 .boss-model { color: var(--dsw-alias-label-tertiary); }
 .boss-running { color: var(--dsw-alias-state-business-primary); }
 .boss-idle { color: var(--dsw-alias-label-secondary); }
