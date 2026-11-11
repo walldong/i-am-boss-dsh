@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({
       offline: 'Host API is not up. Install this bundle and restart Harness.',
       running: 'running', idle: 'idle', off: 'offline',
       balance: 'Balance', wage: 'Wage', tipTotal: 'Tipped', fineTotal: 'Fined',
-      efficiency: 'Return', earned: 'Earned', tokenCost: 'Token cost',
+      profit: 'Profit', earned: 'Earned', tokenCost: 'Token cost',
       frozen: 'paused', 'per.day': '/day', 'per.week': '/week', 'per.month': '/month',
       defaults: 'Default wage', quick: 'Per tip/fine',
       override: 'Own wage', useDefault: 'Use default', ownQuick: 'Own amount',      save: 'Save',
@@ -23,7 +23,7 @@ window.__ModuleLoader__.load({
       offline: '没有连上宿主接口。安装本插件并重启 Harness。',
       running: '在跑', idle: '空闲', off: '离线',
       balance: '余额', wage: '工资', tipTotal: '总打赏', fineTotal: '总罚款',
-      efficiency: '性价比', earned: '收入', tokenCost: 'token 成本',
+      profit: '利润', earned: '收入', tokenCost: 'token 成本',
       frozen: '停薪', 'per.day': '/天', 'per.week': '/周', 'per.month': '/月',
       defaults: '默认工资', quick: '每次打赏/罚款',
       override: '单独工资', useDefault: '用默认', ownQuick: '单独额度',
@@ -78,14 +78,14 @@ window.__ModuleLoader__.load({
         error && h('p', { className: 'boss-error' }, error === 'offline' ? t('offline') : error),
         h('div', { className: 'boss-defaults' },
           h('label', null, t('defaults')),
-          h('select', {
-            value: global.period, 'aria-label': t('defaults'),
-            onChange: (e) => setGlobal({ ...global, period: e.target.value }),
-          }, ['day', 'week', 'month'].map((p) => h('option', { key: p, value: p }, periodLabel(t, p)))),
           h('input', {
             value: global.amount, inputMode: 'decimal', 'aria-label': t('wage'),
             onChange: (e) => setGlobal({ ...global, amount: e.target.value }),
           }),
+          h('select', {
+            value: global.period, 'aria-label': t('defaults'),
+            onChange: (e) => setGlobal({ ...global, period: e.target.value }),
+          }, ['day', 'week', 'month'].map((p) => h('option', { key: p, value: p }, periodLabel(t, p)))),
           h('span', { className: 'boss-sep' }),
           h('label', null, t('quick')),
           h('input', {
@@ -125,24 +125,21 @@ window.__ModuleLoader__.load({
                 stat(t('fineTotal'), signed(employee.fineTotal, '-'), false, 'boss-debt')),
               h('div', { className: 'boss-roi' },
                 h('span', null,
-                  h('span', { className: 'boss-label' }, t('efficiency')), ' ',
-                  h('b', {
-                    className: employee.efficiency === null ? '' : employee.efficiency >= 1 ? 'boss-good' : 'boss-debt',
-                    title: `${t('earned')} ${yuan(employee.earned)} − ${t('tokenCost')} ${yuan(employee.tokenCost)}`,
-                  }, employee.efficiency === null ? '—' : `×${employee.efficiency.toFixed(2)}`)),
+                  h('span', { className: 'boss-label' }, t('profit')), ' ',
+                  h('b', { className: employee.profit >= 0 ? 'boss-good' : 'boss-debt' }, signed(employee.profit, '+'))),
                 h('span', { className: 'boss-roi-detail' },
                   `${t('earned')} ${yuan(employee.earned)} · ${t('tokenCost')} ${yuan(employee.tokenCost)}`)),
               h('details', { className: 'boss-override' },
                 h('summary', null, employee.inherited ? t('override') : t('wage')),
                 h('div', { className: 'boss-override-row' },
-                  h('select', {
-                    value: draft.period, 'aria-label': t('override'),
-                    onChange: (e) => set({ period: e.target.value }),
-                  }, ['day', 'week', 'month'].map((p) => h('option', { key: p, value: p }, periodLabel(t, p)))),
                   h('input', {
                     value: draft.wage, inputMode: 'decimal', 'aria-label': t('wage'),
                     onChange: (e) => set({ wage: e.target.value }),
                   }),
+                  h('select', {
+                    value: draft.period, 'aria-label': t('override'),
+                    onChange: (e) => set({ period: e.target.value }),
+                  }, ['day', 'week', 'month'].map((p) => h('option', { key: p, value: p }, periodLabel(t, p)))),
                   h('button', {
                     type: 'button',
                     onClick: () => post({ action: 'set_employee', id: employee.id, period: draft.period, wage: Number(draft.wage) }),

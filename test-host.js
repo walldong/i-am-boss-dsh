@@ -114,7 +114,7 @@ assert(out.body.employees[0].inherited === true, 'clearing the tip amount left t
 // Agents read their own standing and the efficiency board, but never move money.
 const agentTool = await toolCall({ action: 'self' }, { agent: { id: 'a1' } })
 assert(agentTool.self.id === 'a1', 'self returns the calling employee')
-assert(agentTool.self.efficiency !== undefined, 'self carries efficiency')
+assert(agentTool.self.profit !== undefined, 'self carries the profit figure')
 assert(!('employees' in agentTool), 'self does not leak the roster')
 
 const blockedTip = await toolCall({ action: 'tip', id: 'a1', amount: 999 }, { agent: { id: 'a1' } })
@@ -127,7 +127,7 @@ assert(out.body.employees[0].balance === -2, 'blocked tool calls moved no money'
 const board = await toolCall({ action: 'list' }, { agent: { id: 'a1' } })
 assert(board.you.id === 'a1', 'list names the caller')
 assert(!('balance' in board.board[0]), 'the board hides other balances')
-assert(board.board[0].efficiency !== undefined, 'the board ranks by efficiency')
+assert(board.board[0].profit !== undefined, 'the board ranks by profit')
 
 // Efficiency: earned money against token cost. The first sight of a log is a baseline, so bump it.
 agents[0].session = { usage: { tokenUsage: { totals: { uncachedInputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } } } }
@@ -139,12 +139,17 @@ assert(emp.tokenCost === 4, `four million delta miss tokens cost 4 CNY off-peak,
 const earned = emp.wageTotal + emp.tipTotal - emp.fineTotal
 assert(emp.earned === earned, `earned = wage + tip - fine, got ${emp.earned}`)
 assert(emp.profit === earned - emp.tokenCost, `profit = earned - cost, got ${emp.profit}`)
-assert(emp.efficiency === Math.round((earned / emp.tokenCost) * 1e6) / 1e6, `efficiency = earned / cost, got ${emp.efficiency}`)
-assert(emp.efficiency > 1, 'a cheap agent shows a positive return')
+
+// Display order: live agents first, longest-idle last.
+agents.push({ id: 'gone', status: 'idle', options: { model: 'deepseek-flash' } })
+out = await call()
+assert(out.body.employees[0].id === 'gone' || out.body.employees[0].status !== 'offline', 'live agents sort before offline ones')
+const offline = out.body.employees.filter((employee) => employee.status === 'offline')
+assert(offline.every((employee, index) => index === 0 || (offline[index - 1].lastSeenAt ?? 0) >= (employee.lastSeenAt ?? 0)), 'offline agents sort by last seen')
 
 // The prompt states the same economics the panel shows.
 const later = sections.get('prompted').text()
-assert(later.includes('性价比'), 'standing teaches the efficiency target')
+assert(later.includes('利润'), 'standing teaches the profit target')
 assert(later.includes('token 成本'), 'standing names the token cost')
 
 server.close()

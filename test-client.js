@@ -39,13 +39,13 @@ const EMPLOYEES = [
   {
     id: 'session-abc', status: 'running', rank: 1, balance: -3.5, frozen: false, inherited: true,
     model: 'deepseek-flash', tipTotal: 5, fineTotal: 2, verdictAmount: 1, quickInherited: true, tokenCost: 1.25,
-    earned: 3, profit: 1.75, efficiency: 2.4, wageTotal: 0,
+    earned: 3, profit: 1.75, wageTotal: 0,
     wage: { period: 'day', amount: 10 }, lastPaidAt: '2026-11-11T00:00:00.000Z',
   },
   {
     id: 'session-def', status: 'offline', rank: 2, balance: 42, frozen: true, inherited: false,
     model: 'deepseek-v4-pro', tipTotal: 60, fineTotal: 8, verdictAmount: 5, quickInherited: false, tokenCost: 0,
-    earned: 52, profit: 52, efficiency: null, wageTotal: 0,
+    earned: 52, profit: 52, wageTotal: 0,
     wage: { period: 'week', amount: 70 }, lastPaidAt: '2026-11-01T00:00:00.000Z',
   },
 ]
@@ -127,7 +127,8 @@ assert(rendered.includes('+5.00') && rendered.includes('-2.00'), 'tip and fine t
 assert(!rendered.includes('-0.00'), 'a zero total carries no sign')
 assert(rendered.includes('每次打赏/罚款'), 'the global tip amount is editable')
 assert(rendered.includes('单独额度 5.00'), 'an own tip amount is shown on its card')
-assert(rendered.includes('性价比'), 'the card shows the return on token spend')
+assert(rendered.includes('利润'), 'the card shows profit instead of a ratio')
+assert(rendered.includes('+1.75') || rendered.includes('52.00'), 'profit carries its sign')
 
 const strip = slots.get('conversation.chat.assistant-actions')
 const verdictProps = strip.options.inject('session-abc', undefined)

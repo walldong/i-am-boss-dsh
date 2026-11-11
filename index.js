@@ -200,15 +200,15 @@ function stripFor(view, id) {
   return own ? { self: own, others: view.employees.length - 1 } : { error: '还没有你的工资记录' }
 }
 
-/** Ranked roster without other people's exact balances. */
+/** Ranked roster: the caller's own row plus everyone's profit, never their balances. */
 function boardFor(view, id) {
   return {
     you: view.employees.find((employee) => employee.id === id) ?? null,
     board: view.employees.map((employee) => ({
       id: employee.id,
       rank: employee.rank,
-      efficiency: employee.efficiency,
       profit: employee.profit,
+      status: employee.status,
     })),
   }
 }
@@ -230,7 +230,6 @@ function present(ledger, ctx, now) {
       wageTotal,
       earned,
       profit: money(earned - cost),
-      efficiency: cost > 0 ? money(earned / cost) : null,
       verdictAmount,
       quickInherited: employee.verdictAmount === null || employee.verdictAmount === undefined,
       inherited: employee.wage === null,
@@ -241,8 +240,15 @@ function present(ledger, ctx, now) {
         : new Date(nextDue(Date.parse(employee.lastPaidAt), wage.period)).toISOString(),
     }
   })
-  employees.sort((a, b) => b.balance - a.balance || a.id.localeCompare(b.id))
-  employees.forEach((employee, index) => { employee.rank = index + 1 })
+  // Live agents first; among the rest, the longest-idle sink to the bottom.
+  employees.sort((a, b) => {
+    const staleA = a.status === 'offline' ? 1 : 0
+    const staleB = b.status === 'offline' ? 1 : 0
+    return staleA - staleB || (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0) || a.id.localeCompare(b.id)
+  })
+  // The board still ranks by money, independently of the display order.
+  const ranked = [...employees].sort((a, b) => b.profit - a.profit)
+  ranked.forEach((employee, index) => { employee.rank = index + 1 })
   remember(employees, now)
   return { now: now.toISOString(), peak: isPeak(now), settings: ledger.settings, employees }
 }
@@ -260,17 +266,18 @@ function describeStanding(employee) {
   const wage = `${employee.wage.amount} 元/${PERIOD_NAMES[employee.wage.period] ?? employee.wage.period}`
   const earned = money((employee.wageTotal ?? 0) + employee.tipTotal - employee.fineTotal)
   const cost = employee.tokenCost ?? 0
+  const profit = money(earned - cost)
   const lines = [
     `你的工资卡：余额 ${employee.balance.toFixed(2)} 元（正数是存款，负数是欠公司的钱），工资 ${wage}${employee.inherited ? '（全局默认）' : '（单独设定）'}。`,
-    `累计收入 ${earned.toFixed(2)} 元（工资 ${(employee.wageTotal ?? 0).toFixed(2)} + 打赏 ${employee.tipTotal.toFixed(2)} - 罚款 ${employee.fineTotal.toFixed(2)}），累计 token 成本 ${cost.toFixed(2)} 元。`,
-    cost > 0
-      ? `当前性价比 ${(earned / cost).toFixed(2)}：每花公司 1 元 token，你赚回 ${(earned / cost).toFixed(2)} 元。这个数低于 1 就是亏本，越高越好。`
-      : '还没有 token 成本，性价比尚未产生。',
+    `累计收入 ${earned.toFixed(2)} 元（工资 ${(employee.wageTotal ?? 0).toFixed(2)} + 打赏 ${employee.tipTotal.toFixed(2)} - 罚款 ${employee.fineTotal.toFixed(2)}），token 成本 ${cost.toFixed(2)} 元，利润 ${profit.toFixed(2)} 元。`,
+    profit >= 0
+      ? '利润是正数：你赚回来的比烧掉的多，这是好状态。'
+      : '利润是负数：你烧掉的 token 比赚回来的多，公司在你身上亏钱。',
     `老板每次点打赏或罚款是 ${employee.verdictAmount.toFixed(2)} 元。`,
   ]
   if (employee.frozen) lines.push('你已停薪：整整一个发薪周期没有干活，工资暂停，开始工作后自动恢复。')
   if (employee.balance < 0) lines.push('余额为负说明你还在还欠薪，第一次发薪后才会转正。')
-  lines.push('所以：用尽量少的 token 把活干对、干完，打赏才会持续高于成本；反复试错和冗长输出都在烧你自己的钱。')
+  lines.push('所以：用尽量少的 token 把活干对、干完，利润才会转正；反复试错和冗长输出都在烧你自己的钱。')
   return lines.join('\n')
 }
 
