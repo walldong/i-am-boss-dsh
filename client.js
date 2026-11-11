@@ -9,13 +9,12 @@ window.__ModuleLoader__.load({
       empty: 'No agent has run yet.',
       offline: 'Host API is not up. Install this bundle and restart Harness.',
       running: 'running', idle: 'idle', off: 'offline',
-      peak: 'peak', offpeak: 'off-peak',
-      miss: 'miss', hit: 'hit', write: 'write', out: 'out',
-      wage: 'Set wage', pay: 'Pay one period', tip: 'Tip', fine: 'Fine',
-      balance: 'Balance', score: 'Score',
-      verdicts: 'Verdicts', quickHint: 'Tip/fine per click',
-      saveQuick: 'Save amount',
-      note: 'Balance is the employee’s score: higher is better. Token fees come out of that balance. Tip or fine each finished turn from the icons under the reply.',
+      balance: 'Balance', wage: 'Wage', tipTotal: 'Tipped', fineTotal: 'Fined',
+      frozen: 'paused', 'per.day': '/day', 'per.week': '/week', 'per.month': '/month',
+      defaults: 'Default wage',
+      override: 'Own wage', useDefault: 'Use default',
+      save: 'Save',
+      note: 'Balance starts one wage in debt: the first payday is what clears it. Token fees come out of the balance. An employee paused for a full period earns nothing until it works again.',
     }
     const zh = {
       panel: '员工',
@@ -23,20 +22,24 @@ window.__ModuleLoader__.load({
       empty: '还没有员工。有 agent 跑起来后会出现在这里。',
       offline: '没有连上宿主接口。安装本插件并重启 Harness。',
       running: '在跑', idle: '空闲', off: '离线',
-      peak: '高峰', offpeak: '闲时',
-      miss: '未命中', hit: '命中', write: '写出', out: '输出',
-      wage: '设工资', pay: '发一期', tip: '打赏', fine: '罚款',
-      balance: '余额', score: '身价',
-      verdicts: '奖惩记录', quickHint: '单次打赏/罚款金额',
-      saveQuick: '存为单次额度',
-      note: '余额就是员工的身价，越高越好。token 费用从余额里扣。任务跑完，在回复下面用图标直接打赏或罚款。',
+      balance: '余额', wage: '工资', tipTotal: '总打赏', fineTotal: '总罚款',
+      frozen: '停薪', 'per.day': '/天', 'per.week': '/周', 'per.month': '/月',
+      defaults: '默认工资',
+      override: '单独工资', useDefault: '用默认',
+      save: '保存',
+      note: '入职时先欠一期工资，第一次发薪后转正。token 费用从余额里扣。停摆满一个发薪周期的员工暂停发薪，再干活才恢复。',
     }
+
+    const NS = 'iAmBoss'
+    const periodLabel = (t, period) => t(`per.${period}`)
 
     function Page(props) {
       const t = props.t || ((key) => zh[key])
       const [data, setData] = React.useState(null)
       const [error, setError] = React.useState('')
-      const [draft, setDraft] = React.useState({})
+      const [global, setGlobal] = React.useState({ period: 'day', amount: '10' })
+      const [drafts, setDrafts] = React.useState({})
+
       const load = React.useCallback(() => {
         fetch('/i-am-boss/api').then(async (res) => {
           const body = await res.json()
@@ -50,129 +53,129 @@ window.__ModuleLoader__.load({
         const timer = setInterval(load, 5000)
         return () => clearInterval(timer)
       }, [load])
-      const rowDraft = (id, employee) => draft[id] || {
-        period: employee.wage.period,
-        wageAmount: String(employee.wage.amount),
-        quick: String(employee.verdictAmount),
-      }
+
       const post = (body) => fetch('/i-am-boss/api', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
       }).then(async (res) => {
-        const bodyJson = await res.json().catch(() => ({}))
-        if (!res.ok) setError(bodyJson.error || String(res.status))
+        const out = await res.json().catch(() => ({}))
+        if (!res.ok) setError(out.error || String(res.status))
+        else setError('')
         load()
       })
+
+      const settingsKey = `${data?.settings?.wage?.period}:${data?.settings?.wage?.amount}`
+      React.useEffect(() => {
+        const wage = data?.settings?.wage
+        if (wage) setGlobal({ period: wage.period, amount: String(wage.amount) })
+      }, [settingsKey])
 
       return h('div', { style: pageStyle },
         h('header', { className: 'boss-head' },
           h('h1', null, t('title')),
-          data && h('span', null, `${data.employees.filter((e) => e.status === 'running').length} ${t('running')} · ${data.peak ? t('peak') : t('offpeak')}`)),
-        h('p', { className: 'boss-note' }, t('note')),
+          h('span', { className: 'boss-count' },
+            data ? data.employees.filter((e) => e.status === 'running').length : 0, ' ', t('running'))),
         error && h('p', { className: 'boss-error' }, error === 'offline' ? t('offline') : error),
-        data && data.employees.length === 0 && h('p', { className: 'boss-note' }, t('empty')),
-        data && data.employees.map((employee) => {
-          const form = rowDraft(employee.id, employee)
-          const set = (patch) => setDraft({ ...draft, [employee.id]: { ...form, ...patch } })
-          const tokens = employee.billed || {}
-          return h('article', { key: employee.id, className: 'boss-card' },
-            h('div', { className: 'boss-id' },
-              h('span', { className: 'boss-rank' }, `#${employee.rank}`),
-              h('strong', null, employee.id),
-              h('span', { className: `boss-${employee.status}` }, t(employee.status === 'offline' ? 'off' : employee.status)),
-              employee.model && h('span', { className: 'boss-model' }, employee.model)),
-            h('div', { className: 'boss-score' },
-              h('span', { className: 'boss-label' }, t('balance')),
-              h('b', { className: employee.balance < 0 ? 'boss-debt' : '' }, yuan(employee.balance)),
-              h('span', { className: 'boss-delta' }, `tip +${yuan(employee.tipTotal)} / fine -${yuan(employee.fineTotal)}`)),
-            h('dl', null,
-              row('token', fmtTokens(tokens, t)),
-              row('token ¥', yuan(employee.tokenCost)),
-              row('工资', `${yuan(employee.wage.amount)} / ${employee.wage.period}`),
-              row('下次发薪', new Date(employee.nextPayAt).toLocaleString())),
-            h('div', { className: 'boss-actions' },
-              h('input', { value: form.quick, 'aria-label': t('quickHint'), inputMode: 'decimal', placeholder: t('quickHint'), onChange: (e) => set({ quick: e.target.value }) }),
-              h('button', { type: 'button', onClick: () => post({ action: 'set_quick', id: employee.id, amount: Number(form.quick) }) }, t('saveQuick')),
-              h('button', { type: 'button', onClick: () => post({ action: 'tip', id: employee.id }) }, `▲ ${t('tip')} ${yuan(employee.verdictAmount)}`),
-              h('button', { type: 'button', className: 'boss-danger', onClick: () => post({ action: 'fine', id: employee.id }) }, `▼ ${t('fine')} ${yuan(employee.verdictAmount)}`)),
-            h('details', { className: 'boss-actions-row' },
-              h('summary', null, t('wage')),
-              h('div', { className: 'boss-actions' },
-                h('select', { value: form.period, 'aria-label': 'period', onChange: (e) => set({ period: e.target.value }) },
-                  ['day', 'week', 'month'].map((period) => h('option', { key: period, value: period }, period))),
-                h('input', { value: form.wageAmount, 'aria-label': 'wage', inputMode: 'decimal', onChange: (e) => set({ wageAmount: e.target.value }) }),
-                h('button', { type: 'button', onClick: () => post({ action: 'set_wage', id: employee.id, period: form.period, amount: Number(form.wageAmount) }) }, t('wage')),
-                h('button', { type: 'button', onClick: () => post({ action: 'pay', id: employee.id }) }, t('pay')))),
-            (employee.verdicts || []).length > 0 && h('details', { className: 'boss-actions-row' },
-              h('summary', null, `${t('verdicts')} (${employee.verdicts.length})`),
-              h('ul', { className: 'boss-log' }, employee.verdicts.slice().reverse().map((item, index) => h('li', { key: index },
-                h('span', { className: item.kind === 'tip' ? 'boss-tip' : 'boss-debt' }, `${item.kind === 'tip' ? '+' : '-'}${yuan(item.amount)}`),
-                ` ${new Date(item.at).toLocaleString()}`)))))
-        }))
+        h('div', { className: 'boss-defaults' },
+          h('label', null, t('defaults')),
+          h('select', {
+            value: global.period, 'aria-label': t('defaults'),
+            onChange: (e) => setGlobal({ ...global, period: e.target.value }),
+          }, ['day', 'week', 'month'].map((p) => h('option', { key: p, value: p }, periodLabel(t, p)))),
+          h('input', {
+            value: global.amount, inputMode: 'decimal', 'aria-label': t('wage'),
+            onChange: (e) => setGlobal({ ...global, amount: e.target.value }),
+          }),
+          h('button', {
+            type: 'button',
+            onClick: () => post({ action: 'set_wage', period: global.period, amount: Number(global.amount) }),
+          }, t('save'))),
+        data && data.employees.length === 0 && h('p', { className: 'boss-empty' }, t('empty')),
+        h('div', { className: 'boss-grid' },
+          (data?.employees ?? []).map((employee) => {
+            const draft = drafts[employee.id] ?? { period: employee.wage.period, wage: String(employee.wage.amount) }
+            const set = (patch) => setDrafts({ ...drafts, [employee.id]: { ...draft, ...patch } })
+            return h('article', { key: employee.id, className: `boss-card${employee.frozen ? ' boss-card-frozen' : ''}` },
+              h('div', { className: 'boss-card-head' },
+                h(Avatar, { id: employee.id }),
+                h('div', { className: 'boss-identity' },
+                  h('strong', { title: employee.id }, employee.id),
+                  h('span', { className: `boss-status boss-${employee.status}` },
+                    employee.status === 'offline' ? t('off') : t(employee.status)),
+                  employee.frozen && h('span', { className: 'boss-frozen-tag' }, t('frozen')))),
+              h('div', { className: 'boss-balance' },
+                h('span', { className: 'boss-label' }, t('balance')),
+                h('b', { className: employee.balance < 0 ? 'boss-debt' : 'boss-good' }, yuan(employee.balance))),
+              h('dl', { className: 'boss-stats' },
+                stat(t('wage'), `${yuan(employee.wage.amount)}${periodLabel(t, employee.wage.period)}`, employee.inherited),
+                stat(t('tipTotal'), `+${yuan(employee.tipTotal)}`, false, 'boss-good'),
+                stat(t('fineTotal'), `-${yuan(employee.fineTotal)}`, false, 'boss-debt')),
+              h('details', { className: 'boss-override' },
+                h('summary', null, employee.inherited ? t('override') : t('wage')),
+                h('div', { className: 'boss-override-row' },
+                  h('select', {
+                    value: draft.period, 'aria-label': t('override'),
+                    onChange: (e) => set({ period: e.target.value }),
+                  }, ['day', 'week', 'month'].map((p) => h('option', { key: p, value: p }, periodLabel(t, p)))),
+                  h('input', {
+                    value: draft.wage, inputMode: 'decimal', 'aria-label': t('wage'),
+                    onChange: (e) => set({ wage: e.target.value }),
+                  }),
+                  h('button', {
+                    type: 'button',
+                    onClick: () => post({ action: 'set_employee', id: employee.id, period: draft.period, wage: Number(draft.wage) }),
+                  }, t('save')),
+                  !employee.inherited && h('button', {
+                    type: 'button',
+                    onClick: () => post({ action: 'set_employee', id: employee.id }),
+                  }, t('useDefault')))))
+          })),
+        h('p', { className: 'boss-note' }, t('note')))
     }
 
-    function row(label, value, debt) {
-      return h('div', null, h('dt', null, label), h('dd', { className: debt ? 'boss-debt' : '' }, value))
-    }
-    function yuan(n) { return Number(n || 0).toFixed(4) }
-    function fmtTokens(u, t) {
-      const n = (v) => Number(v || 0).toLocaleString()
-      return `${t('miss')} ${n(u.uncachedInputTokens)} · ${t('hit')} ${n(u.cacheReadTokens)} · ${t('write')} ${n(u.cacheWriteTokens)} · ${t('out')} ${n(u.outputTokens)}`
+    function stat(label, value, inherited, tone) {
+      return h('div', null,
+        h('dt', null, label),
+        h('dd', { className: tone || '' }, value,
+          inherited ? h('span', { className: 'boss-inherited', title: 'default' }, ' ·') : null))
     }
 
-    function Icon() {
-      return h('svg', { viewBox: '0 0 24 24', width: 20, height: 20, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6 },
-        h('circle', { cx: 9, cy: 8, r: 2.2 }),
-        h('path', { d: 'M4.5 18c.6-3 2.4-4.5 4.5-4.5S13 15 13.6 18' }),
-        h('circle', { cx: 17, cy: 15, r: 3.2 }))
+    /** Deterministic from the id, so one employee keeps one face across reloads. */
+    function Avatar({ id }) {
+      const [face] = React.useState(() => faceOf(id))
+      return h('svg', {
+        viewBox: '0 0 40 40', width: 40, height: 40, className: 'boss-avatar', 'aria-hidden': true,
+      },
+        h('rect', { width: 40, height: 40, rx: 12, fill: face.skin }),
+        h('circle', { cx: 20, cy: 17, r: 9, fill: face.face }),
+        h('circle', { cx: 16.5, cy: 16, r: 1.3, fill: face.ink }),
+        h('circle', { cx: 23.5, cy: 16, r: 1.3, fill: face.ink }),
+        h('path', { d: face.mouth, stroke: face.ink, 'stroke-width': 1.4, fill: 'none', 'stroke-linecap': 'round' }),
+        h('path', { d: 'M6 40c1.5-8 7-11 14-11s12.5 3 14 11z', fill: face.skin }))
     }
 
-    /** One shared read of the roster, so each reply does not refetch it. */
-    const rosterCache = { at: 0, employees: [] }
-    function readRoster() {
-      if (Date.now() - rosterCache.at < 15_000) return Promise.resolve(rosterCache.employees)
-      return fetch('/i-am-boss/api').then((res) => res.json()).then((body) => {
-        rosterCache.employees = body.employees || []
-        rosterCache.at = Date.now()
-        return rosterCache.employees
-      })
-    }
+    const PALETTE = [
+      ['#f2d9c4', '#f7e6d7', '#3a2b26'], ['#e8c9a8', '#f5e0c8', '#33241c'],
+      ['#c99b78', '#e2b795', '#2b1d17'], ['#8d6349', '#a87a5c', '#f7ead9'],
+      ['#bcc6d4', '#d3dae4', '#243040'], ['#c9b8dd', '#dcd0ec', '#2f2440'],
+      ['#a9c9bd', '#c6ddd4', '#1f3a32'], ['#e2b3b8', '#f0cdd1', '#3d2027'],
+    ]
+    const MOUTHS = ['M16 22q4 3 8 0', 'M16 22h8', 'M16 22q4 4 8 0', 'M16 22q4 2 8 -0.5']
 
-    /** Tip / fine icons under one finished reply; the amount is the employee's per-click value. */
-    function TurnVerdict({ id, t }) {
-      const [employee, setEmployee] = React.useState(null)
-      const [failure, setFailure] = React.useState('')
-      const load = React.useCallback(() => {
-        readRoster().then((employees) => {
-          setEmployee(employees.find((item) => item.id === id) || null)
-        }).catch(() => {})
-      }, [id])
-      React.useEffect(load, [load])
-      const act = (kind) => {
-        fetch('/i-am-boss/api', {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: kind, id }),
-        }).then(async (res) => {
-          const body = await res.json().catch(() => ({}))
-          if (!res.ok) throw new Error(body.error || String(res.status))
-          rosterCache.employees = body.employees || []
-          rosterCache.at = Date.now()
-          setEmployee(rosterCache.employees.find((item) => item.id === id) || null)
-          setFailure('')
-        }).catch((err) => setFailure(err.message))
+    function faceOf(id) {
+      let hash = 2166136261
+      for (let i = 0; i < id.length; i++) {
+        hash ^= id.charCodeAt(i)
+        hash = Math.imul(hash, 16777619)
       }
-      if (!employee) return null
-      const amount = yuan(employee.verdictAmount)
-      const label = (kind) => `${kind === 'tip' ? t('tip') : t('fine')} ${amount} · ${t('balance')} ${yuan(employee.balance)}`
-      return h(React.Fragment, null,
-        h('button', {
-          type: 'button', className: 'boss-strip', 'aria-label': label('tip'), title: label('tip'),
-          onClick: () => act('tip'),
-        }, h(TipIcon)),
-        h('button', {
-          type: 'button', className: 'boss-strip boss-strip-fine', 'aria-label': label('fine'), title: label('fine'),
-          onClick: () => act('fine'),
-        }, h(FineIcon)),
-        failure && h('span', { className: 'boss-strip-failure' }, failure))
+      const n = hash >>> 0
+      const [skin, face, ink] = PALETTE[n % PALETTE.length]
+      const mouth = MOUTHS[(n >>> 8) % MOUTHS.length]
+      return { skin, face, ink, mouth }
+    }
+
+    function yuan(n) {
+      const value = Number(n || 0)
+      return value.toFixed(2)
     }
 
     function TipIcon() {
@@ -185,10 +188,62 @@ window.__ModuleLoader__.load({
         h('path', { d: 'M8 3v10M8 13 4.5 9.5M8 13l3.5-3.5' }))
     }
 
+    const rosterCache = { at: 0, employees: [] }
+    function readRoster() {
+      if (Date.now() - rosterCache.at < 15_000) return Promise.resolve(rosterCache.employees)
+      return fetch('/i-am-boss/api').then((res) => res.json()).then((body) => {
+        rosterCache.employees = body.employees || []
+        rosterCache.at = Date.now()
+        return rosterCache.employees
+      })
+    }
+
+    /** Tip / fine icons under one finished reply, using the employee's per-click amount. */
+    function TurnVerdict({ id, t }) {
+      const [employee, setEmployee] = React.useState(null)
+      const [failure, setFailure] = React.useState('')
+      const adopt = (employees) => setEmployee(employees.find((item) => item.id === id) || null)
+      React.useEffect(() => {
+        readRoster().then(adopt).catch(() => {})
+      }, [id])
+      const act = (kind) => {
+        fetch('/i-am-boss/api', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: kind, id }),
+        }).then(async (res) => {
+          const body = await res.json().catch(() => ({}))
+          if (!res.ok) throw new Error(body.error || String(res.status))
+          rosterCache.employees = body.employees || []
+          rosterCache.at = Date.now()
+          adopt(rosterCache.employees)
+          setFailure('')
+        }).catch((err) => setFailure(err.message))
+      }
+      if (!employee) return null
+      const label = (kind) => `${kind === 'tip' ? t('tip') : t('fine')} ${yuan(employee.verdictAmount)} · ${t('balance')} ${yuan(employee.balance)}`
+      return h(React.Fragment, null,
+        h('button', {
+          type: 'button', className: 'boss-strip', 'aria-label': label('tip'), title: label('tip'),
+          onClick: () => act('tip'),
+        }, h(TipIcon)),
+        h('button', {
+          type: 'button', className: 'boss-strip boss-strip-fine', 'aria-label': label('fine'), title: label('fine'),
+          onClick: () => act('fine'),
+        }, h(FineIcon)),
+        failure && h('span', { className: 'boss-strip-failure' }, failure))
+    }
+
+    function Icon() {
+      return h('svg', { viewBox: '0 0 24 24', width: 20, height: 20, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6 },
+        h('circle', { cx: 9, cy: 8, r: 2.2 }),
+        h('path', { d: 'M4.5 18c.6-3 2.4-4.5 4.5-4.5S13 15 13.6 18' }),
+        h('circle', { cx: 17, cy: 15, r: 3.2 }))
+    }
+
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
-        ctx.effect(() => ctx.locale.register('iAmBoss', { en, zh }))
+        ctx.effect(() => ctx.locale.register(NS, { en, zh }))
         ctx.effect(() => {
           const tag = document.createElement('style')
           tag.dataset.plugin = 'i-am-boss-dsh'
@@ -196,16 +251,16 @@ window.__ModuleLoader__.load({
           document.head.appendChild(tag)
           return () => tag.remove()
         })
-        const t = ctx.locale.bind('iAmBoss')
+        const t = ctx.locale.bind(NS)
         ctx.slots.inject('main', () => ctx.slots.register({
-          name: 'main', key: 'i-am-boss', locale: 'iAmBoss', inject: () => ({ t }),
+          name: 'main', key: 'i-am-boss', locale: NS, inject: () => ({ t }),
         }, Page))
         ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({
-          name: 'conversation.chat.assistant-actions', id: 'i-am-boss-verdict', order: 20, locale: 'iAmBoss',
+          name: 'conversation.chat.assistant-actions', id: 'i-am-boss-verdict', order: 20, locale: NS,
           inject: (sessionId) => ({ id: sessionId, t }),
         }, TurnVerdict))
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
-          name: 'sidebar.panellist', id: 'i-am-boss', order: 40, locale: 'iAmBoss', label: () => t('panel'),
+          name: 'sidebar.panellist', id: 'i-am-boss', order: 40, locale: NS, label: () => t('panel'),
         }, Icon))
       },
     }
@@ -221,21 +276,51 @@ const pageStyle = {
 const css = `
 .boss-head { display: flex; align-items: baseline; gap: 12px; }
 .boss-head h1 { margin: 0; font-size: 20px; font-weight: 600; }
-.boss-note { color: var(--dsw-alias-label-secondary); margin: 8px 0 16px; }
+.boss-count { color: var(--dsw-alias-label-secondary); }
 .boss-error { color: var(--dsw-alias-state-error-primary); }
-.boss-card { border: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
-.boss-id { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
-.boss-id strong { font-family: ui-monospace, monospace; font-size: 13px; overflow-wrap: anywhere; }
-.boss-rank { color: var(--dsw-alias-label-tertiary); font-family: ui-monospace, monospace; }
-.boss-score { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; }
-.boss-score b { font-size: 24px; font-variant-numeric: tabular-nums; }
-.boss-label { color: var(--dsw-alias-label-tertiary); }
-.boss-delta { color: var(--dsw-alias-label-secondary); font-size: 12px; }
-.boss-tip { color: var(--dsw-alias-state-business-primary); }
-.boss-actions-row { margin-top: 10px; }
-.boss-actions-row summary { cursor: pointer; color: var(--dsw-alias-label-secondary); }
-.boss-log { margin: 8px 0 0; padding-left: 18px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
-.boss-note-input { flex: 1 1 200px; }
+.boss-empty { color: var(--dsw-alias-label-secondary); }
+.boss-defaults { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 18px; }
+.boss-defaults label { color: var(--dsw-alias-label-secondary); }
+.boss-defaults input, .boss-defaults select, .boss-defaults button,
+.boss-override-row input, .boss-override-row select, .boss-override-row button {
+  font: inherit; color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base); border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px; padding: 5px 9px;
+}
+.boss-defaults input, .boss-override-row input { width: 84px; font-variant-numeric: tabular-nums; }
+.boss-defaults button, .boss-override-row button { cursor: pointer; }
+.boss-defaults button:hover, .boss-override-row button:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.boss-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 12px; }
+.boss-card {
+  border: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1);
+  border-radius: 12px; padding: 14px;
+}
+.boss-card-frozen { opacity: 0.72; }
+.boss-card-head { display: flex; align-items: center; gap: 10px; }
+.boss-avatar { flex: none; border-radius: 12px; }
+.boss-identity { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.boss-identity strong {
+  font-family: ui-monospace, monospace; font-size: 12px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.boss-status { font-size: 12px; }
+.boss-running { color: var(--dsw-alias-state-business-primary); }
+.boss-idle { color: var(--dsw-alias-label-secondary); }
+.boss-offline { color: var(--dsw-alias-label-tertiary); }
+.boss-frozen-tag { color: var(--dsw-alias-state-warn-label); font-size: 12px; }
+.boss-balance { display: flex; align-items: baseline; justify-content: space-between; margin: 12px 0 8px; }
+.boss-balance b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.boss-label { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.boss-good { color: var(--dsw-alias-state-business-primary); }
+.boss-debt { color: var(--dsw-alias-state-error-primary); }
+.boss-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 0; }
+.boss-stats dt { color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.boss-stats dd { margin: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.boss-inherited { color: var(--dsw-alias-label-tertiary); }
+.boss-override { margin-top: 10px; }
+.boss-override summary { cursor: pointer; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.boss-override-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.boss-note { color: var(--dsw-alias-label-secondary); margin: 16px 0 0; font-size: 12px; }
 .boss-strip {
   width: 28px; height: 28px; padding: 6px; display: inline-flex; align-items: center; justify-content: center;
   border: none; border-radius: var(--dsw-radius-sm); background: none; cursor: pointer;
@@ -244,20 +329,4 @@ const css = `
 .boss-strip:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-secondary); }
 .boss-strip-fine:hover { color: var(--dsw-alias-state-error-primary); }
 .boss-strip-failure { color: var(--dsw-alias-label-tertiary); font-size: 13px; padding-left: 4px; }
-.boss-model { color: var(--dsw-alias-label-tertiary); }
-.boss-running { color: var(--dsw-alias-state-business-primary); }
-.boss-idle { color: var(--dsw-alias-label-secondary); }
-.boss-offline { color: var(--dsw-alias-label-tertiary); }
-.boss-card dl { display: grid; grid-template-columns: 72px 1fr; gap: 4px 8px; margin: 10px 0; }
-.boss-card dt { color: var(--dsw-alias-label-tertiary); }
-.boss-card dd { margin: 0; }
-.boss-debt { color: var(--dsw-alias-state-error-primary); }
-.boss-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.boss-actions input, .boss-actions select, .boss-actions button {
-  font: inherit; color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-base); border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; padding: 6px 10px;
-}
-.boss-actions button { cursor: pointer; }
-.boss-actions button:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.boss-danger { color: var(--dsw-alias-state-error-primary); }
 `

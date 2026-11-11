@@ -4,12 +4,13 @@ DeepSeek Harness 插件：把正在运行的 agent 当员工管理，按日 / �
 
 ## 功能
 
-- 自动入职：`ctx.agents.list()` 里出现的 agent 直接进名册，显示 `running` / `idle` / `offline` 和模型。
-- 身价评分：余额就是员工的身价，越高越好，名册按余额排名。
-- 工资体系：每个员工一份 `{ period, amount }`，可设 day / week / month，到期自动入账（最多每次补 36 期）。
-- 打赏 / 罚款：每条回复下方有两个箭头图标，点一下就按该员工的「单次额度」打赏或罚款，不填理由；面板里也能改这个额度。保留最近 20 条奖惩记录。
-- Token 计量：读 `tokenUsage` 投影的未命中输入 / 缓存命中 / 缓存写出 / 输出四个桶，按 DeepSeek 牌价折算成钱并从余额扣除 —— 干得差的员工会被自己的消耗拖成欠薪。入职前已产生的用量不补扣。
-- Agent 工具：`boss_payroll`，`action` 为 `list | set_wage | pay | set_quick | tip | fine`。
+- 自动入职：`ctx.agents.list()` 里出现的 agent 直接进名册，卡片显示头像（按 id 生成，稳定不变）、状态和模型。
+- 身价评分：余额就是员工的身价，越高越好，卡片按余额排序。
+- 先欠后付：入职时先记一期工资的负余额，第一次发薪才转正；一个发薪周期没有产生 token 消耗就停薪，重新干活才恢复。
+- 工资配置：全局一套「金额 + 周期」，员工可单独覆盖，个体优先；去掉覆盖即回到全局。
+- 打赏 / 罚款：每条回复下方两个箭头图标，按该员工的单次额度打赏或罚款，不填理由。卡片显示累计总打赏与总罚款。
+- Token 计量：读 `tokenUsage` 投影的未命中输入 / 缓存命中 / 缓存写出 / 输出四个桶，按 DeepSeek 牌价折算成钱并从余额扣除。
+- Agent 工具：`boss_payroll`，`action` 为 `list | set_wage | set_employee | set_quick | pay | tip | fine`。
 
 ## 计价
 
@@ -37,17 +38,19 @@ plugin_manager action=install_bundle target=/绝对路径/i-am-boss-dsh
 | 文件 | 作用 |
 | --- | --- |
 | `index.js` | Host 插件：路由 `/i-am-boss/api`、30 秒结算定时器、`boss_payroll` 工具、账本读写 |
-| `payroll.js` | 纯计算：计价、增量扣费、工资入账。`node payroll.js` 跑自检 |
-| `client.js` | Web UI：`sidebar.panellist` 入口 + `main` 面板 |
+| `payroll.js` | 纯计算：计价、增量扣费、工资入账、停薪判定 |
+| `client.js` | Web UI：`sidebar.panellist` 入口 + `main` 卡片面板 + 回复下的打赏/罚款图标 |
 | `cordis.patch.yml` | bundle patch，插入 `i-am-boss` 行 |
 
-账本在 `~/.dsh/i-am-boss-ledger.json`，原子写入（临时文件 + rename）。
+账本在 `~/.dsh/i-am-boss-ledger.json`，原子写入（临时文件 + rename）。v1 账本会自动迁移。
 
 ## 自检
 
 ```
-node --check index.js && node payroll.js
+node payroll.js && node test-host.js && node test-client.js
 ```
+
+`payroll.js` 跑计价与发薪断言；`test-host.js` 用假 ctx 起 HTTP 打真实路由；`test-client.js` 用微型 React shim 渲染真实组件并断言卡片内容。
 
 ## 发布
 

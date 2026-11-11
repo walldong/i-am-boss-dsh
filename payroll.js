@@ -61,18 +61,27 @@ export function nextDue(fromMs, period) {
   return fromMs + PERIOD_MS[period]
 }
 
-/** Credit elapsed periods, at most 36 per call. ponytail: cap per settle; the next settle continues. */export function accrueWages(employee, nowMs) {
+/** Wages pay for work already delivered: a period with no work pays nothing. */
+export function accrueWages(employee, nowMs, wage) {
   let paid = 0
   let cursor = Date.parse(employee.lastPaidAt)
   for (let n = 0; n < 36; n++) {
-    const due = nextDue(cursor, employee.wage.period)
+    const due = nextDue(cursor, wage.period)
     if (due > nowMs) break
-    employee.balance = money(employee.balance + employee.wage.amount)
-    paid = money(paid + employee.wage.amount)
+    if (employee.workedAt >= cursor) {
+      employee.balance = money(employee.balance + wage.amount)
+      paid = money(paid + wage.amount)
+    }
     cursor = due
   }
   employee.lastPaidAt = new Date(cursor).toISOString()
   return paid
+}
+
+/** Idle for a whole pay period: wages stop until the employee works again. */
+export function isFrozen(employee, wage, nowMs) {
+  const since = Math.max(employee.workedAt, Date.parse(employee.hiredAt))
+  return nextDue(since, wage.period) <= nowMs
 }
 
 function assert(cond, msg) {  if (!cond) throw new Error(msg)
@@ -92,14 +101,20 @@ function demo() {
   const again = usageCharge(used, { ...used, outputTokens: 1_500_000 }, 'deepseek-flash', off)
   assert(again.cost === 2, 'delta output only')
   assert(usageCharge(used, zero, 'deepseek-flash', off).cost === 0, 'shrink is not a refund')
-  const emp = {
-    balance: 0,
-    lastPaidAt: '2026-11-01T00:00:00.000Z',
-    wage: { period: 'day', amount: 10 },
-  }
-  assert(accrueWages(emp, Date.parse('2026-11-01T12:00:00.000Z')) === 0, 'not due yet')
-  assert(accrueWages(emp, Date.parse('2026-11-04T00:00:00.000Z')) === 30, 'three days')
-  assert(emp.balance === 30, 'balance')
+  const wage = { period: 'day', amount: 10 }
+  const emp = { balance: -10, lastPaidAt: '2026-11-01T00:00:00.000Z', hiredAt: '2026-11-01T00:00:00.000Z', workedAt: Date.parse('2026-11-01T01:00:00.000Z') }
+  assert(accrueWages(emp, Date.parse('2026-11-01T12:00:00.000Z'), wage) === 0, 'not due yet')
+  assert(!isFrozen(emp, wage, Date.parse('2026-11-01T20:00:00.000Z')), 'worked this period')
+  assert(accrueWages(emp, Date.parse('2026-11-02T00:00:00.000Z'), wage) === 10, 'one worked day')
+  assert(emp.balance === 0, 'debt settled by the first payday')
+  assert(isFrozen(emp, wage, Date.parse('2026-11-02T12:00:00.000Z')), 'idle a whole period')
+  const paidAt = { ...emp, lastPaidAt: '2026-11-02T00:00:00.000Z' }
+  assert(accrueWages(paidAt, Date.parse('2026-11-05T00:00:00.000Z'), wage) === 0, 'idle periods pay nothing')
+  assert(paidAt.balance === 0, 'frozen balance unchanged')
+  const never = { balance: -10, lastPaidAt: '2026-11-01T00:00:00.000Z', hiredAt: '2026-11-01T00:00:00.000Z', workedAt: 0 }
+  assert(accrueWages(never, Date.parse('2026-11-03T00:00:00.000Z'), wage) === 0, 'no work, no pay')
+  assert(never.balance === -10, 'debt stays')
+  assert(isFrozen(never, wage, Date.parse('2026-11-02T00:00:00.000Z')), 'no work for a period')
   console.log('payroll ok')
 }
 

@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { accrueWages, emptyUsage, isPeak, money, nextDue, usageCharge } from './payroll.js'
+import { accrueWages, emptyUsage, isFrozen, isPeak, money, nextDue, usageCharge } from './payroll.js'
 
 const LEDGER = join(homedir(), '.dsh', 'i-am-boss-ledger.json')
-const DEFAULT_WAGE = { period: 'day', amount: 10 }
+const DEFAULTS = { wage: { period: 'day', amount: 10 }, verdictAmount: 1 }
 
 export const inject = ['agents', 'webServer', 'sessionProjections']
 
@@ -31,14 +31,15 @@ export function apply(ctx) {
 function bossTool(queue, ctx) {
   return {
     name: 'boss_payroll',
-    description: '员工名册与工资体系。余额是员工的身价评分，越高越好。action: list | set_wage | pay | set_quick | tip | fine。tip/fine 不给 amount 时使用该员工的单次奖惩额度。token 费用会自动从余额扣除。',
+    description: '员工名册与工资体系。余额是员工身价，越高越好。action: list | set_wage（全局工资）| set_employee（单个员工工资/单次奖惩额度）| set_quick | pay | tip | fine。token 费用自动从余额扣除，停摆超过一个发薪周期的员工停止发薪。',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'set_wage', 'pay', 'set_quick', 'tip', 'fine'] },
+        action: { type: 'string', enum: ['list', 'set_wage', 'set_employee', 'set_quick', 'pay', 'tip', 'fine'] },
         id: { type: 'string', description: '员工 id，即 agent / session id' },
         period: { type: 'string', enum: ['day', 'week', 'month'] },
-        amount: { type: 'number', description: '金额（元），必须大于 0；tip/fine 可省略，走单次额度' },
+        amount: { type: 'number', description: '金额（元）；tip/fine 省略时走单次额度' },
+        wage: { type: 'number', description: 'set_employee 的个体工资；省略则清除个体配置，回到全局' },
       },
       required: ['action'],
     },
@@ -65,15 +66,28 @@ async function handle(req, res, queue, ctx) {
 function act(queue, ctx, args) {
   return queue.push(() => {
     const ledger = load()
-    const view = settle(ctx, ledger)
-    if (args.action === 'list') return view
-    const employee = ledger.employees[args.id]
-    if (!employee) return { error: '没有这个员工' }
+    settle(ctx, ledger)
+    if (args.action === 'list') return present(ledger, ctx, new Date())
+    const wageOf = (employee) => employee.wage ?? ledger.settings.wage
     if (args.action === 'set_wage') {
       if (!['day', 'week', 'month'].includes(args.period) || !(args.amount > 0)) return { error: '工资要选 day/week/month，金额要大于 0' }
-      employee.wage = { period: args.period, amount: money(args.amount) }
+      ledger.settings.wage = { period: args.period, amount: money(args.amount) }
+      save(ledger)
+      return present(ledger, ctx, new Date())
+    }
+    const employee = ledger.employees[args.id]
+    if (!employee) return { error: '没有这个员工' }
+    if (args.action === 'set_employee') {
+      if (!(args.wage > 0)) {
+        employee.wage = null
+      } else {
+        if (!['day', 'week', 'month'].includes(args.period)) return { error: '个体工资要选 day/week/month' }
+        employee.wage = { period: args.period, amount: money(args.wage) }
+      }
+      if (args.amount > 0) employee.verdictAmount = money(args.amount)
     } else if (args.action === 'pay') {
-      employee.balance = money(employee.balance + employee.wage.amount)
+      employee.balance = money(employee.balance + wageOf(employee).amount)
+      employee.lastPaidAt = new Date().toISOString()
     } else if (args.action === 'set_quick') {
       if (!(args.amount > 0)) return { error: '单次奖惩额度要大于 0' }
       employee.verdictAmount = money(args.amount)
@@ -83,12 +97,11 @@ function act(queue, ctx, args) {
       const tip = args.action === 'tip'
       employee.balance = money(employee.balance + (tip ? amount : -amount))
       employee[tip ? 'tipTotal' : 'fineTotal'] = money(employee[tip ? 'tipTotal' : 'fineTotal'] + amount)
-      employee.verdicts = [...(employee.verdicts || []), { at: new Date().toISOString(), kind: args.action, amount }].slice(-20)
     } else {
       return { error: '未知操作' }
     }
     save(ledger)
-    return settle(ctx, ledger)
+    return present(ledger, ctx, new Date())
   })
 }
 
@@ -104,26 +117,31 @@ function settle(ctx, ledger) {
     const usage = readUsage(ctx, agent)
     if (usage) {
       const charge = usageCharge(employee.billed, usage, employee.model, now)
-      if (charge.cost) employee.balance = money(employee.balance - charge.cost)
+      if (charge.cost) {
+        employee.balance = money(employee.balance - charge.cost)
+        employee.workedAt = now.getTime()
+      }
       employee.tokenCost = money(employee.tokenCost + charge.cost)
       employee.billed = charge.billed
     }
-    accrueWages(employee, now.getTime())
+    employee.lastSeenAt = now.getTime()
   }
   for (const employee of Object.values(ledger.employees)) {
-    if (!seen.has(employee.id)) accrueWages(employee, now.getTime())
+    accrueWages(employee, now.getTime(), employee.wage ?? ledger.settings.wage)
   }
   save(ledger)
-  return present(ledger, live, now)
+  return present(ledger, ctx, now)
 }
 
+/** Joining puts the employee one period's wage in debt; payday is what clears it. */
 function ensure(ledger, id, now) {
   if (!ledger.employees[id]) {
     const at = now.toISOString()
+    const wage = ledger.settings.wage
     ledger.employees[id] = {
-      id, hiredAt: at, lastPaidAt: at, model: '',
-      wage: { ...DEFAULT_WAGE }, balance: 0, tokenCost: 0, billed: null,
-      tipTotal: 0, fineTotal: 0, verdicts: [], verdictAmount: 1,
+      id, hiredAt: at, lastPaidAt: at, workedAt: now.getTime(), lastSeenAt: now.getTime(), model: '',
+      wage: null, balance: money(-wage.amount), tokenCost: 0, billed: null,
+      tipTotal: 0, fineTotal: 0, verdictAmount: ledger.settings.verdictAmount,
     }
   }
   return ledger.employees[id]
@@ -143,27 +161,64 @@ function modelOf(agent) {
   return String(config?.model || agent.options?.model || '')
 }
 
-function present(ledger, live, now) {
-  const status = new Map(live.map((agent) => [String(agent.id), agent.status]))
-  const employees = Object.values(ledger.employees).map((employee) => ({
-    ...employee,
-    status: status.get(employee.id) || 'offline',
-    nextPayAt: new Date(nextDue(Date.parse(employee.lastPaidAt), employee.wage.period)).toISOString(),
-  }))
+function present(ledger, ctx, now) {
+  const status = new Map(ctx.agents.list().map((agent) => [String(agent.id), agent.status]))
+  const employees = Object.values(ledger.employees).map((employee) => {
+    const wage = employee.wage ?? ledger.settings.wage
+    const at = now.getTime()
+    return {
+      ...employee,
+      wage,
+      inherited: employee.wage === null,
+      status: status.get(employee.id) || 'offline',
+      frozen: isFrozen(employee, wage, at),
+      nextPayAt: isFrozen(employee, wage, at)
+        ? null
+        : new Date(nextDue(Date.parse(employee.lastPaidAt), wage.period)).toISOString(),
+    }
+  })
   employees.sort((a, b) => b.balance - a.balance || a.id.localeCompare(b.id))
   employees.forEach((employee, index) => { employee.rank = index + 1 })
-  return { now: now.toISOString(), peak: isPeak(now), employees }
+  return { now: now.toISOString(), peak: isPeak(now), settings: ledger.settings, employees }
+}
+
+/** Version 1 kept wages per employee and paid on a fixed clock; adopt it without losing balances. */
+function migrate(data) {
+  const settings = { ...structuredClone(DEFAULTS) }
+  const employees = {}
+  for (const [id, old] of Object.entries(data.employees)) {
+    employees[id] = {
+      id,
+      hiredAt: old.hiredAt,
+      lastPaidAt: old.lastPaidAt,
+      workedAt: old.tokenCost > 0 ? Date.parse(old.lastPaidAt) : 0,
+      lastSeenAt: Date.parse(old.lastPaidAt),
+      model: old.model ?? '',
+      wage: old.wage ? { ...old.wage } : null,
+      balance: old.balance ?? 0,
+      tokenCost: old.tokenCost ?? 0,
+      billed: old.billed ?? null,
+      tipTotal: old.tipTotal ?? 0,
+      fineTotal: old.fineTotal ?? 0,
+      verdictAmount: old.verdictAmount ?? settings.verdictAmount,
+    }
+  }
+  return { version: 2, settings, employees }
 }
 
 function load() {
-  if (!existsSync(LEDGER)) return { version: 1, employees: {} }
+  if (!existsSync(LEDGER)) return { version: 2, settings: structuredClone(DEFAULTS), employees: {} }
   const data = JSON.parse(readFileSync(LEDGER, 'utf8'))
-  if (data.version !== 1 || !data.employees) throw new Error('账本损坏')
+  if (data.version === 1) return migrate(data)
+  if (data.version !== 2 || !data.employees) throw new Error(`账本版本 ${data.version} 不兼容`)
+  data.settings = { ...structuredClone(DEFAULTS), ...data.settings }
   for (const employee of Object.values(data.employees)) {
+    employee.wage ??= null
     employee.tipTotal ??= 0
     employee.fineTotal ??= 0
-    employee.verdictAmount ??= 1
-    employee.verdicts ??= []
+    employee.verdictAmount ??= data.settings.verdictAmount
+    employee.workedAt ??= 0
+    employee.lastSeenAt ??= 0
   }
   return data
 }
