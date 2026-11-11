@@ -1,32 +1,73 @@
 # i-am-boss-dsh
 
-把 DeepSeek Harness 里正在运行的 agent 当员工管理：**按日 / 周 / 月发工资，按性价比打赏或罚款，token 费用从员工自己的工资里扣。**
+把 DeepSeek Harness 里正在跑的 agent 变成你的员工：**按日/周/月发工资，按性价比打赏或罚款，token 费用从它自己的工资里扣。**
 
 [![DSH](https://img.shields.io/badge/DeepSeek%20Harness-%E2%89%A5%200.2.1-1f6b4a)](https://github.com/deepseek-ai/deepseek-harness)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-> 员工花公司的 token 是要还的。干得好拿打赏，干得差被罚款，烧太多就欠薪 —— 于是它自己会算这笔账。
+> 你给每个 agent 发工资。它烧的每一分 token 钱，都要从这份工资里扣。
+>
+> 干得好有打赏，干得差被罚款，试错太多就欠薪。
+>
+> **于是它开始算账了。**
 
-## 它解决什么
+---
 
-agent 跑起来之后，你通常只知道"它花了多少钱"，不知道"值不值"。这个插件把每个 agent 变成一个员工账户：
+## 一句话：把"花了多少钱"变成"值不值"
 
-- 每轮对话的 token 钱按 DeepSeek 官方牌价算出来，从它的工资余额里扣；
-- 每条回复下面点一下就打赏或罚款，按完成质量给；
-- 卡片上直接显示「性价比」= 收入 ÷ token 成本，低于 1 就是亏本；
-- 这句话也写进 agent 自己的系统提示里，所以它会主动省 token、少试错。
+平时你只能看到账单：这个 agent 今天烧了 3 块钱。但 3 块钱换来的是一个能上线的功能，还是一堆反复推翻的废代码？账单不会告诉你。
 
-## 功能
+这个插件给每个 agent 开一个银行账户，让它的开销和收入落在同一栏里：
 
-- 自动入职：`ctx.agents.list()` 里出现的 agent 直接进名册，卡片显示头像（按 id 生成，稳定不变）、状态和模型。
-- 身价评分：余额就是员工的身价，越高越好，卡片按余额排序。
-- 先欠后付：入职时先记一期工资的负余额，第一次发薪才转正；一个发薪周期没有产生 token 消耗就停薪，重新干活才恢复。
-- 工资配置：全局一套「金额 + 周期」和「单次打赏/罚款额度」，员工可分别覆盖，个体优先；去掉覆盖即回到全局。
-- 打赏 / 罚款：每条回复下方两个按钮，写着 `+1.00` / `-1.00` 这种带符号的金额，点一下直接生效，不填理由。
-- 性价比：卡片显示「收入 ÷ token 成本」的回报倍数（`×2.40`），低于 1 就是亏本。收入 = 累计工资 + 打赏 − 罚款。
-- 工资感知：每个 agent 的系统提示里有一段自己的工资卡，随结算刷新，明确告诉它「少烧 token 干对活」才是最优策略。
-- 权限：改工资、打赏、罚款只能由你操作。agent 的工具只有 `self`（看自己）和 `list`（性价比排行榜，不含他人余额），不能给自己或同事发钱。
-- Agent 工具：`boss_payroll`，`action` 为 `self | list`。
+| | 记在哪 |
+| --- | --- |
+| 工资 | 每过一个发薪周期，自动入账（前提是它在干活） |
+| 打赏 | 你点一下，按完成质量给 |
+| 罚款 | 你点一下，返工就扣 |
+| **token 成本** | 每轮对话按官方牌价实时扣，含缓存命中/未命中分档和峰谷价 |
+
+剩下的一个数字就是答案：**性价比 = 收入 ÷ token 成本**。
+
+- `×2.40` → 它花的每 1 元换回 2.4 元，赚的
+- `×0.60` → 在亏本，这个 agent 该换思路了
+
+---
+
+## 最有趣的地方：它自己看得见这张工资卡
+
+这是我认为最值的设计。每个 agent 的系统提示里都有一段自己的工资卡，随结算刷新：
+
+```
+你的工资卡：余额 -10.00 元（正数是存款，负数是欠公司的钱），工资 10 元/天（全局默认）。
+累计收入 0.00 元（工资 0.00 + 打赏 0.00 - 罚款 0.00），累计 token 成本 1.28 元。
+当前性价比 0.00：每花公司 1 元 token，你赚回 0.00 元。这个数低于 1 就是亏本，越高越好。
+老板每次点打赏或罚款是 1.00 元。
+余额为负说明你还在还欠薪，第一次发薪后才会转正。
+所以：用尽量少的 token 把活干对、干完，打赏才会持续高于成本；反复试错和冗长输出都在烧你自己的钱。
+```
+
+效果是：**你不用教它省钱，它自己会省。** 少读一遍没必要的文件、别把整个日志贴进上下文、别写三轮才对，这些它以前不在乎的事，现在直接扣它的钱。
+
+而且这不是口头威胁，是真实账本：扣的钱真的减少了余额，余额真的决定它在排行榜上的位置。
+
+### 几个好玩的用法
+
+- **让它自己报账**：问"你今天赚了多少？"，它会答出余额、性价比和还欠多少 —— 数据来自 `boss_payroll` 工具，不是幻觉。
+- **给好员工涨薪**：某个 agent 连续几次 ×3 以上，给它单独设更高的日薪，剩下的维持默认。
+- **公开处刑**：排行榜按余额排序，倒数第一的卡片是红色负数。它自己查 `list` 也能看到自己排第几（但看不到别人有多少钱）。
+- **停薪观察**：一个发薪周期没干活，工资自动停发，卡片标"停薪"。重新干活就恢复 —— 不用你手动管。
+- **打赏当 code review**：改得好点 `+5`，跑偏了点 `-5`。不写理由，两个按钮就够。
+
+---
+
+## 具体能干什么
+
+- **自动入职**：`ctx.agents.list()` 里出现的 agent 直接进名册，卡片显示按 id 生成的固定头像、状态、模型。
+- **先欠后付**：入职时先记一期工资的负余额，第一次发薪才转正。所以新员工永远是负数起步，赚回来才算真本事。
+- **工资两级配置**：全局一套「金额 + 周期」和「单次打赏/罚款额度」，每个员工可单独覆盖，个体优先；点「用默认」退回全局。
+- **打赏 / 罚款**：每条回复下方两个按钮，直接写 `+1.00` / `-1.00`，点一下生效，不填理由。
+- **性价比**：卡片上大字显示回报倍数，悬停能看到"收入 X − 成本 Y"的算式。
+- **权限分明**：改工资、打赏、罚款只有你能操作。agent 的工具只有 `self`（看自己）和 `list`（只看排行榜的性价比，不含他人余额），不能给自己或同事发钱。
 
 ## 计价
 
@@ -38,6 +79,8 @@ agent 跑起来之后，你通常只知道"它花了多少钱"，不知道"值�
 | `deepseek-v4-pro` | 0.15 | 4.5 | 13.5 |
 
 高峰为北京时间周一至周五 9:00–12:00、14:00–18:00。法定节假日未排除，价格改在 `payroll.js` 的 `RATES`。
+
+数据来自 Harness 的 `tokenUsage` 投影，按四类桶分别计价：未命中输入、缓存命中、缓存写出、输出。只看增量，入职前已经产生的用量不补扣。
 
 ## 安装
 
@@ -55,7 +98,7 @@ dsh plugin --profile desktop add github:walldong/i-am-boss-dsh
 plugin_manager action=install_bundle target=/绝对路径/i-am-boss-dsh
 ```
 
-更新：`dsh plugin --profile desktop update i-am-boss-dsh`，之后必须重启。宿主编译版本没有 HMR 时，改完代码同样要重启。
+更新：`dsh plugin --profile desktop update i-am-boss-dsh`，之后必须重启。
 
 ## 加入插件市场
 
@@ -65,16 +108,18 @@ DSH 没有官方市场，Discover 读的是社区索引。本仓库已打 `dsh-p
 https://raw.githubusercontent.com/walldong/i-am-boss-dsh/main/market/index.json
 ```
 
+在 Plugins → More → 开启 **Custom plugin markets** → Discover 里粘贴即可。
+
 ## 结构
 
 | 文件 | 作用 |
 | --- | --- |
-| `index.js` | Host 插件：路由 `/i-am-boss/api`、30 秒结算定时器、`boss_payroll` 工具、账本读写 |
+| `index.js` | Host 插件：路由 `/i-am-boss/api`、30 秒结算定时器、`boss_payroll` 工具、账本读写、每 agent 的工资卡提示 |
 | `payroll.js` | 纯计算：计价、增量扣费、工资入账、停薪判定 |
-| `client.js` | Web UI：`sidebar.panellist` 入口 + `main` 卡片面板 + 回复下的打赏/罚款图标 |
+| `client.js` | Web UI：`sidebar.panellist` 入口 + `main` 卡片面板 + 回复下的打赏/罚款按钮 |
 | `cordis.patch.yml` | bundle patch，插入 `i-am-boss` 行 |
 
-账本在 `~/.dsh/i-am-boss-ledger.json`，原子写入（临时文件 + rename）。v1 账本会自动迁移。
+账本在 `~/.dsh/i-am-boss-ledger.json`，原子写入（临时文件 + rename）。v1 账本自动迁移。
 
 ## 自检
 
@@ -82,27 +127,7 @@ https://raw.githubusercontent.com/walldong/i-am-boss-dsh/main/market/index.json
 node payroll.js && node test-host.js && node test-client.js
 ```
 
-`payroll.js` 跑计价与发薪断言；`test-host.js` 用假 ctx 起 HTTP 打真实路由；`test-client.js` 用微型 React shim 渲染真实组件并断言卡片内容。
-
-## 发布
-
-推 `v*` tag 触发 `.github/workflows/publish.yml`，需要仓库 secret `NPM_TOKEN`（npmjs.org Automation Token）：
-
-```
-git tag v1.0.0 && git push origin v1.0.0
-```
-
-## 插件市场
-
-DSH **没有官方市场**，Discover 只列你手动添加的索引（格式 1 的 JSON）。本仓库自带一份：
-
-```
-https://raw.githubusercontent.com/walldong/i-am-boss-dsh/main/market/index.json
-```
-
-在 Plugins → More → 开启 **Custom plugin markets** → Discover 里粘贴上面这个 URL 即可搜到。索引里的版本用 `git` source + commit SHA 固定，`npm` 发布后可改成 `{"type":"npm"}`。
-
-改完 `market/index.json` 用 DSH 自带的 `@deepseek-ai/dsh-plugin-market-index` 的 `parseMarketIndex` 校验，和 Discover 读的是同一套规则；版本按 SemVer 降序，`publishTimestamp` 是 Unix 秒。
+`payroll.js` 跑计价与发薪断言；`test-host.js` 用假 ctx 起 HTTP 打真实路由，验证覆盖优先级、负数开局、停薪、权限拒绝、性价比算式；`test-client.js` 用微型 React shim 渲染真实组件并断言卡片内容。
 
 ## License
 
