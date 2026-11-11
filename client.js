@@ -12,9 +12,10 @@ window.__ModuleLoader__.load({
       balance: 'Balance', wage: 'Wage', tipTotal: 'Tipped', fineTotal: 'Fined',
       profit: 'Profit', earned: 'Earned', tokenCost: 'Token cost',
       frozen: 'paused', 'per.day': '/day', 'per.week': '/week', 'per.month': '/month',
-      defaults: 'Default wage', quick: 'Per tip/fine',
-      override: 'Own wage', useDefault: 'Use default', ownQuick: 'Own amount',      save: 'Save',
-      note: 'Balance opens one period in the red: the first payday is what brings it to zero. Token fees come out of the balance. An employee paused for a full period earns nothing until it works again.',
+      defaults: 'Default wage', quick: 'Per tip/fine', starting: 'Opening balance',
+      override: 'Own wage', useDefault: 'Use default', ownQuick: 'Own amount',
+      save: 'Save',
+      note: 'Each new employee is credited the opening balance once. Token fees come out of the balance. An employee paused for a full period earns nothing until it works again.',
     }
     const zh = {
       panel: '员工',
@@ -25,10 +26,10 @@ window.__ModuleLoader__.load({
       balance: '余额', wage: '工资', tipTotal: '总打赏', fineTotal: '总罚款',
       profit: '利润', earned: '收入', tokenCost: 'token 成本',
       frozen: '停薪', 'per.day': '/天', 'per.week': '/周', 'per.month': '/月',
-      defaults: '默认工资', quick: '每次打赏/罚款',
+      defaults: '默认工资', quick: '每次打赏/罚款', starting: '初始余额',
       override: '单独工资', useDefault: '用默认', ownQuick: '单独额度',
       save: '保存',
-      note: '入职时余额是一期工资的负数：这段是负债工作，干满一期、第一次发薪后归零转正。token 费用从余额里扣。停摆满一个发薪周期的员工暂停发薪，再干活才恢复。',
+      note: '新员工入职时一次性发放初始余额。token 费用从余额里扣。停摆满一个发薪周期的员工暂停发薪，再干活才恢复。',
     }
 
     const NS = 'iAmBoss'
@@ -38,7 +39,7 @@ window.__ModuleLoader__.load({
       const t = props.t || ((key) => zh[key])
       const [data, setData] = React.useState(null)
       const [error, setError] = React.useState('')
-      const [global, setGlobal] = React.useState({ period: 'day', amount: '10' })
+      const [global, setGlobal] = React.useState({ period: 'day', amount: '10', quick: '1', starting: '10' })
       const [drafts, setDrafts] = React.useState({})
 
       const load = React.useCallback(() => {
@@ -64,10 +65,15 @@ window.__ModuleLoader__.load({
         load()
       })
 
-      const settingsKey = `${data?.settings?.wage?.period}:${data?.settings?.wage?.amount}:${data?.settings?.verdictAmount}`
+      const settingsKey = `${data?.settings?.wage?.period}:${data?.settings?.wage?.amount}:${data?.settings?.verdictAmount}:${data?.settings?.startingBalance}`
       React.useEffect(() => {
         const wage = data?.settings?.wage
-        if (wage) setGlobal({ period: wage.period, amount: String(wage.amount), quick: String(data.settings.verdictAmount) })
+        if (wage) setGlobal({
+          period: wage.period,
+          amount: String(wage.amount),
+          quick: String(data.settings.verdictAmount),
+          starting: String(data.settings.startingBalance ?? 10),
+        })
       }, [settingsKey])
 
       return h('div', { style: pageStyle },
@@ -92,11 +98,18 @@ window.__ModuleLoader__.load({
             value: global.quick, inputMode: 'decimal', 'aria-label': t('quick'),
             onChange: (e) => setGlobal({ ...global, quick: e.target.value }),
           }),
+          h('span', { className: 'boss-sep' }),
+          h('label', null, t('starting')),
+          h('input', {
+            value: global.starting, inputMode: 'decimal', 'aria-label': t('starting'),
+            onChange: (e) => setGlobal({ ...global, starting: e.target.value }),
+          }),
           h('button', {
             type: 'button',
             onClick: () => Promise.all([
               post({ action: 'set_wage', period: global.period, amount: Number(global.amount) }),
               post({ action: 'set_quick', amount: Number(global.quick) }),
+              post({ action: 'set_starting', amount: Number(global.starting) }),
             ]),
           }, t('save'))),
         data && data.employees.length === 0 && h('p', { className: 'boss-empty' }, t('empty')),

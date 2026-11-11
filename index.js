@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { accrueWages, emptyUsage, isFrozen, isPeak, money, nextDue, usageCharge } from './payroll.js'
 
 const LEDGER = join(homedir(), '.dsh', 'i-am-boss-ledger.json')
-const DEFAULTS = { wage: { period: 'day', amount: 10 }, verdictAmount: 1 }
+const DEFAULTS = { wage: { period: 'day', amount: 10 }, verdictAmount: 1, startingBalance: 10 }
 
 /** Latest settled standing per agent, so prompt assembly never reads the disk. */
 const standing = new Map()
@@ -107,6 +107,12 @@ function act(queue, ctx, args) {
       save(ledger)
       return present(ledger, ctx, new Date())
     }
+    if (args.action === 'set_starting') {
+      if (!(args.amount >= 0)) return { error: '初始余额不能是负数' }
+      ledger.settings.startingBalance = money(args.amount)
+      save(ledger)
+      return present(ledger, ctx, new Date())
+    }
     const employee = ledger.employees[args.id]
     if (!employee) return { error: '没有这个员工' }
     if (args.action === 'set_employee') {
@@ -166,15 +172,14 @@ function settle(ctx, ledger) {
   return present(ledger, ctx, now)
 }
 
-/** Joining starts the employee one period in the hole: it works off that advance before it is in the black. */
+/** Joining credits the starting balance once; the first payday comes at the end of the period it works. */
 function ensure(ledger, id, now) {
   if (!ledger.employees[id]) {
     const at = now.toISOString()
-    const wage = ledger.settings.wage
     ledger.employees[id] = {
       id, hiredAt: at, lastPaidAt: at, workedAt: now.getTime(), lastSeenAt: now.getTime(), model: '',
-      wage: null, balance: money(-wage.amount), tokenCost: 0, billed: null,
-      tipTotal: 0, fineTotal: 0, wageTotal: 0, verdictAmount: null,
+      wage: null, balance: money(ledger.settings.startingBalance), tokenCost: 0, billed: null,
+      tipTotal: 0, fineTotal: 0, wageTotal: 0, verdictAmount: null, startingCredit: true,
     }
   }
   return ledger.employees[id]
@@ -268,7 +273,7 @@ function describeStanding(employee) {
   const cost = employee.tokenCost ?? 0
   const profit = money(earned - cost)
   const lines = [
-    `你的工资卡：余额 ${employee.balance.toFixed(2)} 元（正数是存款，负数是欠公司的钱），工资 ${wage}${employee.inherited ? '（全局默认）' : '（单独设定）'}。`,
+    `你的工资卡：余额 ${employee.balance.toFixed(2)} 元（正数是存款，负数说明花掉的比赚到的多），工资 ${wage}${employee.inherited ? '（全局默认）' : '（单独设定）'}。`,
     `累计收入 ${earned.toFixed(2)} 元（工资 ${(employee.wageTotal ?? 0).toFixed(2)} + 打赏 ${employee.tipTotal.toFixed(2)} - 罚款 ${employee.fineTotal.toFixed(2)}），token 成本 ${cost.toFixed(2)} 元，利润 ${profit.toFixed(2)} 元。`,
     profit >= 0
       ? '利润是正数：你赚回来的比烧掉的多，这是好状态。'
@@ -276,7 +281,7 @@ function describeStanding(employee) {
     `老板每次点打赏或罚款是 ${employee.verdictAmount.toFixed(2)} 元。`,
   ]
   if (employee.frozen) lines.push('你已停薪：整整一个发薪周期没有干活，工资暂停，开始工作后自动恢复。')
-  if (employee.balance < 0) lines.push('余额为负说明你在负债工作：公司先预付了一期工资，干满这一期、拿到第一次发薪后归零转正。')
+  if (employee.balance < 0) lines.push('余额是负数：你花掉的比赚到的多，公司在你身上倒贴。')
   lines.push('所以：用尽量少的 token 把活干对、干完，利润才会转正；反复试错和冗长输出都在烧你自己的钱。')
   return lines.join('\n')
 }
@@ -315,7 +320,8 @@ function migrate(data) {
       lastSeenAt: Date.parse(old.lastPaidAt),
       model: old.model ?? '',
       wage: old.wage ? { ...old.wage } : null,
-      balance: old.balance ?? money(-(old.wage ?? settings.wage).amount),
+      balance: old.balance ?? money(settings.startingBalance),
+      startingCredit: true,
       tokenCost: old.tokenCost ?? 0,
       billed: old.billed ?? null,
       tipTotal: old.tipTotal ?? 0,
@@ -341,11 +347,13 @@ function load() {
     employee.verdictAmount ??= null
     employee.workedAt ??= 0
     employee.lastSeenAt ??= 0
-    // Records written before the advance rule carry a zero balance with no activity at all.
-    // Nothing was ever earned or spent, so the opening advance still stands.
-    if (employee.balance === 0 && employee.tokenCost === 0 && employee.wageTotal === 0
-      && employee.tipTotal === 0 && employee.fineTotal === 0) {
-      employee.balance = money(-(employee.wage ?? data.settings.wage).amount)
+    // Ledgers from the advance era opened at minus one wage. Reset only untouched
+    // records, so anyone with real earnings or spend keeps their history.
+    if (!employee.startingCredit && employee.tokenCost === 0 && employee.wageTotal === 0
+      && employee.tipTotal === 0 && employee.fineTotal === 0
+      && employee.balance === money(-(employee.wage ?? data.settings.wage).amount)) {
+      employee.balance = money(data.settings.startingBalance)
+      employee.startingCredit = true
     }
   }
   return data

@@ -51,7 +51,7 @@ agents.push({ id: 'a1', status: 'idle', options: { model: 'deepseek-flash' } })
 let out = await call()
 assert(out.body.employees.length === 1, 'hired')
 let emp = out.body.employees[0]
-assert(emp.balance === -10, `starts one period in debt, got ${emp.balance}`)
+assert(emp.balance === 10, `starts with the configured opening balance, got ${emp.balance}`)
 assert(emp.wage.amount === 10 && emp.wage.period === 'day', 'inherits default wage')
 assert(emp.inherited === true, 'marked inherited')
 
@@ -67,9 +67,9 @@ emp = out.body.employees[0]
 assert(emp.wage.amount === 70 && emp.inherited === true, 'dropping the override restores the default')
 
 out = await call({ action: 'tip', id: 'a1', amount: 5 })
-assert(out.body.employees[0].balance === -5, 'tip credits')
+assert(out.body.employees[0].balance === 15, 'tip credits')
 out = await call({ action: 'fine', id: 'a1', amount: 2 })
-assert(out.body.employees[0].balance === -7, 'fine debits')
+assert(out.body.employees[0].balance === 13, 'fine debits')
 assert(out.body.employees[0].tipTotal === 5 && out.body.employees[0].fineTotal === 2, 'totals')
 
 const bad = await call({ action: 'set_wage', period: 'year', amount: 1 })
@@ -77,9 +77,15 @@ assert(bad.status === 400, 'bad period rejected')
 const missing = await call({ action: 'tip', id: 'nope' })
 assert(missing.status === 400, 'unknown employee rejected')
 
-// A record with no activity at all still owes the hire wage, even in an old ledger.
-const idle = out.body.employees.find((employee) => employee.id === 'a1')
-assert(idle.balance < 0 || idle.tokenCost > 0, 'an untouched employee stays in debt')
+// The opening balance is configurable and credited once, when the employee joins.
+const first = await call({ action: 'set_starting', amount: 25 })
+assert(first.body.settings.startingBalance === 25, 'starting balance saved')
+agents.push({ id: 'fresh', status: 'idle', options: { model: 'deepseek-flash' } })
+out = await call()
+const hire = out.body.employees.find((employee) => employee.id === 'fresh')
+assert(hire.balance === 25, `a new employee joins with the configured balance, got ${hire.balance}`)
+const negative = await call({ action: 'set_starting', amount: -5 })
+assert(negative.status === 400, 'a negative opening balance is rejected')
 // Prompt awareness: one section per agent, scoped, reading the latest standing.
 const sections = new Map()
 const fakeAgent = (id) => ({
@@ -100,17 +106,19 @@ assert(prompt.includes('70 元/周'), 'standing mentions the inherited wage')
 assert(prompt.includes('打赏或罚款是'), 'standing mentions the tip amount')
 assert(!prompt.includes('停薪'), 'a fresh hire is not paused')
 
+const balanceOf = (text) => Number(/余额 (-?\d+\.\d\d)/.exec(text)[1])
+const before = balanceOf(prompt)
 await call({ action: 'fine', id: 'prompted', amount: 4 })
 prompt = sections.get('prompted').text()
-assert(prompt.includes('-74.00'), `standing follows the balance, got ${prompt.split('\n')[0]}`)
-assert(prompt.includes('余额为负'), 'negative balance is explained')
+assert(balanceOf(prompt) === before - 4, `standing follows the balance, got ${prompt.split('\n')[0]}`)
+assert(!prompt.includes('余额是负数'), 'a funded employee is not flagged as overspending')
 // Global default tip amount, then an employee override.
 out = await call({ action: 'set_quick', amount: 5 })
 assert(out.body.settings.verdictAmount === 5, 'global tip amount saved')
 emp = out.body.employees[0]
 assert(emp.verdictAmount === 5 && emp.quickInherited === true, 'employees inherit the global amount')
 out = await call({ action: 'tip', id: 'a1' })
-assert(out.body.employees[0].balance === -2, `tip used the global amount, got ${out.body.employees[0].balance}`)
+assert(out.body.employees.find((e) => e.id === 'a1').balance === 18, 'tip used the global amount')
 out = await call({ action: 'set_quick', id: 'a1', amount: 3 })
 assert(out.body.employees[0].verdictAmount === 3 && out.body.employees[0].quickInherited === false, 'own amount wins')
 out = await call({ action: 'set_employee', id: 'a1', amount: 0 })
@@ -128,7 +136,7 @@ assert(String(blockedTip.error).includes('只有老板'), `agent cannot tip, got
 const blockedWage = await toolCall({ action: 'set_wage', period: 'day', amount: 999 }, { agent: { id: 'a1' } })
 assert(String(blockedWage.error).includes('只有老板'), 'agent cannot set wages')
 out = await call()
-assert(out.body.employees[0].balance === -2, 'blocked tool calls moved no money')
+assert(out.body.employees.find((e) => e.id === 'a1').balance === 18, 'blocked tool calls moved no money')
 
 const board = await toolCall({ action: 'list' }, { agent: { id: 'a1' } })
 assert(board.you.id === 'a1', 'list names the caller')
@@ -158,25 +166,31 @@ const later = sections.get('prompted').text()
 assert(later.includes('利润'), 'standing teaches the profit target')
 assert(later.includes('token 成本'), 'standing names the token cost')
 
-// A ledger written before the debt rule still owes the hire wage, once and only once.
+// A ledger from the advance era is repaired to the configured opening balance, once.
 const seeded = {
   version: 2,
-  settings: { wage: { period: 'day', amount: 10 }, verdictAmount: 1 },
+  settings: { wage: { period: 'day', amount: 10 }, verdictAmount: 1, startingBalance: 10 },
   employees: {
     idle: {
       id: 'idle', hiredAt: '2026-11-01T00:00:00.000Z', lastPaidAt: '2026-11-01T00:00:00.000Z',
-      model: '', wage: null, balance: 0, tokenCost: 0, billed: null,
+      model: '', wage: null, balance: -10, tokenCost: 0, billed: null,
       tipTotal: 0, fineTotal: 0, wageTotal: 0, verdictAmount: null, workedAt: 0, lastSeenAt: 0,
+    },
+    earner: {
+      id: 'earner', hiredAt: '2026-11-01T00:00:00.000Z', lastPaidAt: '2026-11-01T00:00:00.000Z',
+      model: '', wage: null, balance: -4, tokenCost: 1.5, billed: null,
+      tipTotal: 8, fineTotal: 0.5, wageTotal: 0, verdictAmount: null, workedAt: 1, lastSeenAt: 1,
     },
   },
 }
 writeFileSync(LEDGER_PATH, JSON.stringify(seeded))
 await call()
-let stored = JSON.parse(readFileSync(LEDGER_PATH, 'utf8')).employees.idle
-assert(stored.balance === -10, `an untouched employee owes one period, got ${stored.balance}`)
+let stored = JSON.parse(readFileSync(LEDGER_PATH, 'utf8')).employees
+assert(stored.idle.balance === 10, `an untouched employee gets the opening balance, got ${stored.idle.balance}`)
+assert(stored.earner.balance === -4, `real history is left alone, got ${stored.earner.balance}`)
 await call()
-stored = JSON.parse(readFileSync(LEDGER_PATH, 'utf8')).employees.idle
-assert(stored.balance === -10, `the repair does not compound, got ${stored.balance}`)
+stored = JSON.parse(readFileSync(LEDGER_PATH, 'utf8')).employees
+assert(stored.idle.balance === 10, `the repair does not compound, got ${stored.idle.balance}`)
 
 server.close()
 for (const dispose of cleanups) dispose()
