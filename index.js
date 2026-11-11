@@ -315,7 +315,7 @@ function migrate(data) {
       lastSeenAt: Date.parse(old.lastPaidAt),
       model: old.model ?? '',
       wage: old.wage ? { ...old.wage } : null,
-      balance: old.balance ?? 0,
+      balance: old.balance ?? money(-(old.wage ?? settings.wage).amount),
       tokenCost: old.tokenCost ?? 0,
       billed: old.billed ?? null,
       tipTotal: old.tipTotal ?? 0,
@@ -341,6 +341,12 @@ function load() {
     employee.verdictAmount ??= null
     employee.workedAt ??= 0
     employee.lastSeenAt ??= 0
+    // Records written before the debt rule carry a zero balance with no activity at all.
+    // Nothing was ever earned or spent, so the hire debt still stands.
+    if (employee.balance === 0 && employee.tokenCost === 0 && employee.wageTotal === 0
+      && employee.tipTotal === 0 && employee.fineTotal === 0) {
+      employee.balance = money(-(employee.wage ?? data.settings.wage).amount)
+    }
   }
   return data
 }

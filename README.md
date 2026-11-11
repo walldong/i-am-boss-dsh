@@ -130,7 +130,7 @@ https://raw.githubusercontent.com/walldong/i-am-boss-dsh/main/market/index.json
 node payroll.js && node test-host.js && node test-client.js
 ```
 
-`payroll.js` 跑计价与发薪断言；`test-host.js` 用假 ctx 起 HTTP 打真实路由，验证覆盖优先级、负数开局、停薪、权限拒绝、利润算式；`test-client.js` 用微型 React shim 渲染真实组件并断言卡片内容。
+`payroll.js` 跑计价与发薪断言；`test-host.js` 用假 ctx 起 HTTP 打真实路由，验证覆盖优先级、负数开局、停薪、权限拒绝、利润算式，以及旧账本的欠薪修复只生效一次；`test-client.js` 用微型 React shim 渲染真实组件并断言卡片内容。
 
 ## License
 

@@ -1,10 +1,13 @@
 /** Host-level check: fake ctx, then drive /i-am-boss/api through the handler. */
 import { createServer } from 'node:http'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-process.env.HOME = mkdtempSync(join(tmpdir(), 'boss-'))
+const home = mkdtempSync(join(tmpdir(), 'boss-'))
+mkdirSync(join(home, '.dsh'), { recursive: true })
+process.env.HOME = home
+const LEDGER_PATH = join(home, '.dsh/i-am-boss-ledger.json')
 const { apply } = await import('./index.js')
 
 const agents = []
@@ -74,6 +77,9 @@ assert(bad.status === 400, 'bad period rejected')
 const missing = await call({ action: 'tip', id: 'nope' })
 assert(missing.status === 400, 'unknown employee rejected')
 
+// A record with no activity at all still owes the hire wage, even in an old ledger.
+const idle = out.body.employees.find((employee) => employee.id === 'a1')
+assert(idle.balance < 0 || idle.tokenCost > 0, 'an untouched employee stays in debt')
 // Prompt awareness: one section per agent, scoped, reading the latest standing.
 const sections = new Map()
 const fakeAgent = (id) => ({
@@ -151,6 +157,26 @@ assert(offline.every((employee, index) => index === 0 || (offline[index - 1].las
 const later = sections.get('prompted').text()
 assert(later.includes('利润'), 'standing teaches the profit target')
 assert(later.includes('token 成本'), 'standing names the token cost')
+
+// A ledger written before the debt rule still owes the hire wage, once and only once.
+const seeded = {
+  version: 2,
+  settings: { wage: { period: 'day', amount: 10 }, verdictAmount: 1 },
+  employees: {
+    idle: {
+      id: 'idle', hiredAt: '2026-11-01T00:00:00.000Z', lastPaidAt: '2026-11-01T00:00:00.000Z',
+      model: '', wage: null, balance: 0, tokenCost: 0, billed: null,
+      tipTotal: 0, fineTotal: 0, wageTotal: 0, verdictAmount: null, workedAt: 0, lastSeenAt: 0,
+    },
+  },
+}
+writeFileSync(LEDGER_PATH, JSON.stringify(seeded))
+await call()
+let stored = JSON.parse(readFileSync(LEDGER_PATH, 'utf8')).employees.idle
+assert(stored.balance === -10, `an untouched employee owes one period, got ${stored.balance}`)
+await call()
+stored = JSON.parse(readFileSync(LEDGER_PATH, 'utf8')).employees.idle
+assert(stored.balance === -10, `the repair does not compound, got ${stored.balance}`)
 
 server.close()
 for (const dispose of cleanups) dispose()
