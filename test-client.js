@@ -38,12 +38,12 @@ const React = {
 const EMPLOYEES = [
   {
     id: 'session-abc', status: 'running', rank: 1, balance: -3.5, frozen: false, inherited: true,
-    model: 'deepseek-flash', tipTotal: 5, fineTotal: 2, verdictAmount: 1, tokenCost: 1.25,
+    model: 'deepseek-flash', tipTotal: 5, fineTotal: 2, verdictAmount: 1, quickInherited: true, tokenCost: 1.25,
     wage: { period: 'day', amount: 10 }, lastPaidAt: '2026-11-11T00:00:00.000Z',
   },
   {
     id: 'session-def', status: 'offline', rank: 2, balance: 42, frozen: true, inherited: false,
-    model: 'deepseek-v4-pro', tipTotal: 60, fineTotal: 8, verdictAmount: 5, tokenCost: 0,
+    model: 'deepseek-v4-pro', tipTotal: 60, fineTotal: 8, verdictAmount: 5, quickInherited: false, tokenCost: 0,
     wage: { period: 'week', amount: 70 }, lastPaidAt: '2026-11-01T00:00:00.000Z',
   },
 ]
@@ -54,7 +54,10 @@ globalThis.fetch = async (url, options) => {
   return {
     ok: true,
     status: 200,
-    json: async () => ({ employees: EMPLOYEES, settings: { wage: { period: 'day', amount: 10 }, verdictAmount: 1 } }),
+    json: async () => ({
+      employees: EMPLOYEES,
+      settings: { wage: { period: 'day', amount: 10 }, verdictAmount: 3 },
+    }),
   }
 }
 
@@ -119,6 +122,8 @@ assert(rendered.includes('10.00/天'), 'inherited wage with its period')
 assert(rendered.includes('70.00/周'), 'own wage with its period')
 assert(rendered.includes('停薪'), 'paused employee is marked')
 assert(rendered.includes('+5.00') && rendered.includes('-2.00'), 'tip and fine totals')
+assert(rendered.includes('每次打赏/罚款'), 'the global tip amount is editable')
+assert(rendered.includes('单独额度 5.00'), 'an own tip amount is shown on its card')
 
 const strip = slots.get('conversation.chat.assistant-actions')
 const verdictProps = strip.options.inject('session-abc', undefined)
@@ -131,6 +136,8 @@ resetHooks()
 text.length = 0
 walk(React.createElement(strip.component, verdictProps))
 assert(calls.some((call) => call.action === 'list'), 'strip reads the roster')
+const stripText = text.join(' ')
+assert(stripText.includes('+1.00') && stripText.includes('-1.00'), `strip labels the signed amount, got ${stripText}`)
 
 console.log('client ok')
 process.exit(0)

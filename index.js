@@ -6,7 +6,10 @@ import { accrueWages, emptyUsage, isFrozen, isPeak, money, nextDue, usageCharge 
 const LEDGER = join(homedir(), '.dsh', 'i-am-boss-ledger.json')
 const DEFAULTS = { wage: { period: 'day', amount: 10 }, verdictAmount: 1 }
 
-export const inject = ['agents', 'webServer', 'sessionProjections']
+/** Latest settled standing per agent, so prompt assembly never reads the disk. */
+const standing = new Map()
+
+export const inject = ['agents', 'webServer', 'sessionProjections', 'systemPrompt']
 
 export function apply(ctx) {
   const queue = createQueue()
@@ -25,6 +28,23 @@ export function apply(ctx) {
       disposeRoute()
       if (typeof disposeTools === 'function') disposeTools()
     }
+  })
+  const agentSections = new Map()
+  ctx.on('agent/created', ({ agent }) => {
+    const id = String(agent.id)
+    const dispose = agent.ctx.effect(() => agent.ctx.systemPrompt.section({
+      name: 'i-am-boss:payroll',
+      order: 900,
+      text: () => standingFor(id),
+    }))
+    agentSections.set(id, dispose)
+  })
+  ctx.on('agent/disposed', ({ agent }) => {
+    agentSections.delete(String(agent.id))
+  })
+  ctx.effect(() => () => {
+    for (const dispose of agentSections.values()) dispose()
+    agentSections.clear()
   })
 }
 
@@ -75,24 +95,31 @@ function act(queue, ctx, args) {
       save(ledger)
       return present(ledger, ctx, new Date())
     }
+    if (args.action === 'set_quick' && !args.id) {
+      if (!(args.amount > 0)) return { error: '打赏额度要大于 0' }
+      ledger.settings.verdictAmount = money(args.amount)
+      save(ledger)
+      return present(ledger, ctx, new Date())
+    }
     const employee = ledger.employees[args.id]
     if (!employee) return { error: '没有这个员工' }
     if (args.action === 'set_employee') {
-      if (!(args.wage > 0)) {
-        employee.wage = null
-      } else {
-        if (!['day', 'week', 'month'].includes(args.period)) return { error: '个体工资要选 day/week/month' }
-        employee.wage = { period: args.period, amount: money(args.wage) }
+      if (Object.hasOwn(args, 'wage')) {
+        employee.wage = args.wage > 0 && ['day', 'week', 'month'].includes(args.period)
+          ? { period: args.period, amount: money(args.wage) }
+          : null
       }
-      if (args.amount > 0) employee.verdictAmount = money(args.amount)
+      if (Object.hasOwn(args, 'amount')) {
+        employee.verdictAmount = args.amount > 0 ? money(args.amount) : null
+      }
     } else if (args.action === 'pay') {
       employee.balance = money(employee.balance + wageOf(employee).amount)
       employee.lastPaidAt = new Date().toISOString()
     } else if (args.action === 'set_quick') {
-      if (!(args.amount > 0)) return { error: '单次奖惩额度要大于 0' }
+      if (!(args.amount > 0)) return { error: '打赏额度要大于 0' }
       employee.verdictAmount = money(args.amount)
     } else if (args.action === 'tip' || args.action === 'fine') {
-      const amount = args.amount > 0 ? money(args.amount) : employee.verdictAmount
+      const amount = args.amount > 0 ? money(args.amount) : quickOf(employee, ledger)
       if (!(amount > 0)) return { error: '金额要大于 0' }
       const tip = args.action === 'tip'
       employee.balance = money(employee.balance + (tip ? amount : -amount))
@@ -141,7 +168,7 @@ function ensure(ledger, id, now) {
     ledger.employees[id] = {
       id, hiredAt: at, lastPaidAt: at, workedAt: now.getTime(), lastSeenAt: now.getTime(), model: '',
       wage: null, balance: money(-wage.amount), tokenCost: 0, billed: null,
-      tipTotal: 0, fineTotal: 0, verdictAmount: ledger.settings.verdictAmount,
+      tipTotal: 0, fineTotal: 0, verdictAmount: null,
     }
   }
   return ledger.employees[id]
@@ -161,14 +188,19 @@ function modelOf(agent) {
   return String(config?.model || agent.options?.model || '')
 }
 
+const quickOf = (employee, ledger) => employee.verdictAmount ?? ledger.settings.verdictAmount
+
 function present(ledger, ctx, now) {
   const status = new Map(ctx.agents.list().map((agent) => [String(agent.id), agent.status]))
   const employees = Object.values(ledger.employees).map((employee) => {
     const wage = employee.wage ?? ledger.settings.wage
     const at = now.getTime()
+    const verdictAmount = quickOf(employee, ledger)
     return {
       ...employee,
       wage,
+      verdictAmount,
+      quickInherited: employee.verdictAmount === null || employee.verdictAmount === undefined,
       inherited: employee.wage === null,
       status: status.get(employee.id) || 'offline',
       frozen: isFrozen(employee, wage, at),
@@ -179,8 +211,52 @@ function present(ledger, ctx, now) {
   })
   employees.sort((a, b) => b.balance - a.balance || a.id.localeCompare(b.id))
   employees.forEach((employee, index) => { employee.rank = index + 1 })
+  remember(employees, now)
   return { now: now.toISOString(), peak: isPeak(now), settings: ledger.settings, employees }
 }
+
+/** Prompt text: one short, self-contained fact block per employee. */
+function remember(employees, now) {
+  standing.clear()
+  for (const employee of employees) standing.set(employee.id, describeStanding(employee))
+  if (employees.length === 0) standing.set('', `工资系统在 ${now.toISOString()} 还没有名册。`)
+}
+
+const PERIOD_NAMES = { day: '天', week: '周', month: '月' }
+
+function describeStanding(employee) {
+  const wage = `${employee.wage.amount} 元/${PERIOD_NAMES[employee.wage.period] ?? employee.wage.period}`
+  const lines = [
+    `你的工资卡：余额 ${employee.balance.toFixed(2)} 元（正数是存款，负数是欠公司的钱），工资 ${wage}${employee.inherited ? '（全局默认）' : '（单独设定）'}。`,
+    `打赏 ${employee.tipTotal.toFixed(2)} 元，罚款 ${employee.fineTotal.toFixed(2)} 元。每消耗 token 的费用都从余额里扣，所以干得越多花得越多。`,
+    `老板每次点打赏或罚款是 ${employee.verdictAmount.toFixed(2)} 元。`,
+  ]
+  if (employee.frozen) lines.push('你已停薪：整整一个发薪周期没有干活，工资暂停，开始工作后自动恢复。')
+  if (employee.balance < 0) lines.push('余额为负说明你还在还欠薪，第一次发薪后才会转正。')
+  lines.push('老板会在回复下面用打赏或罚款按钮评价你的工作质量。')
+  return lines.join('\n')
+}
+
+/** Read the persisted employee directly, for a prompt assembled before the first settle. */
+function standingFor(id) {
+  const cached = standing.get(id)
+  if (cached !== undefined) return cached
+  const ledger = load()
+  const employee = ledger.employees[id]
+  if (!employee) return ''
+  const wage = employee.wage ?? ledger.settings.wage
+  const text = describeStanding({
+    ...employee,
+    wage,
+    inherited: employee.wage === null,
+    verdictAmount: quickOf(employee, ledger),
+    frozen: isFrozen(employee, wage, Date.now()),
+  })
+  standing.set(id, text)
+  return text
+}
+
+/** Read the persisted employee without settling, for a prompt assembled before the first tick. */
 
 /** Version 1 kept wages per employee and paid on a fixed clock; adopt it without losing balances. */
 function migrate(data) {
@@ -200,7 +276,7 @@ function migrate(data) {
       billed: old.billed ?? null,
       tipTotal: old.tipTotal ?? 0,
       fineTotal: old.fineTotal ?? 0,
-      verdictAmount: old.verdictAmount ?? settings.verdictAmount,
+      verdictAmount: old.verdictAmount ?? null,
     }
   }
   return { version: 2, settings, employees }
@@ -216,7 +292,7 @@ function load() {
     employee.wage ??= null
     employee.tipTotal ??= 0
     employee.fineTotal ??= 0
-    employee.verdictAmount ??= data.settings.verdictAmount
+    employee.verdictAmount ??= null
     employee.workedAt ??= 0
     employee.lastSeenAt ??= 0
   }

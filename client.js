@@ -11,9 +11,8 @@ window.__ModuleLoader__.load({
       running: 'running', idle: 'idle', off: 'offline',
       balance: 'Balance', wage: 'Wage', tipTotal: 'Tipped', fineTotal: 'Fined',
       frozen: 'paused', 'per.day': '/day', 'per.week': '/week', 'per.month': '/month',
-      defaults: 'Default wage',
-      override: 'Own wage', useDefault: 'Use default',
-      save: 'Save',
+      defaults: 'Default wage', quick: 'Per tip/fine',
+      override: 'Own wage', useDefault: 'Use default', ownQuick: 'Own amount',      save: 'Save',
       note: 'Balance starts one wage in debt: the first payday is what clears it. Token fees come out of the balance. An employee paused for a full period earns nothing until it works again.',
     }
     const zh = {
@@ -24,8 +23,8 @@ window.__ModuleLoader__.load({
       running: '在跑', idle: '空闲', off: '离线',
       balance: '余额', wage: '工资', tipTotal: '总打赏', fineTotal: '总罚款',
       frozen: '停薪', 'per.day': '/天', 'per.week': '/周', 'per.month': '/月',
-      defaults: '默认工资',
-      override: '单独工资', useDefault: '用默认',
+      defaults: '默认工资', quick: '每次打赏/罚款',
+      override: '单独工资', useDefault: '用默认', ownQuick: '单独额度',
       save: '保存',
       note: '入职时先欠一期工资，第一次发薪后转正。token 费用从余额里扣。停摆满一个发薪周期的员工暂停发薪，再干活才恢复。',
     }
@@ -63,10 +62,10 @@ window.__ModuleLoader__.load({
         load()
       })
 
-      const settingsKey = `${data?.settings?.wage?.period}:${data?.settings?.wage?.amount}`
+      const settingsKey = `${data?.settings?.wage?.period}:${data?.settings?.wage?.amount}:${data?.settings?.verdictAmount}`
       React.useEffect(() => {
         const wage = data?.settings?.wage
-        if (wage) setGlobal({ period: wage.period, amount: String(wage.amount) })
+        if (wage) setGlobal({ period: wage.period, amount: String(wage.amount), quick: String(data.settings.verdictAmount) })
       }, [settingsKey])
 
       return h('div', { style: pageStyle },
@@ -85,14 +84,27 @@ window.__ModuleLoader__.load({
             value: global.amount, inputMode: 'decimal', 'aria-label': t('wage'),
             onChange: (e) => setGlobal({ ...global, amount: e.target.value }),
           }),
+          h('span', { className: 'boss-sep' }),
+          h('label', null, t('quick')),
+          h('input', {
+            value: global.quick, inputMode: 'decimal', 'aria-label': t('quick'),
+            onChange: (e) => setGlobal({ ...global, quick: e.target.value }),
+          }),
           h('button', {
             type: 'button',
-            onClick: () => post({ action: 'set_wage', period: global.period, amount: Number(global.amount) }),
+            onClick: () => Promise.all([
+              post({ action: 'set_wage', period: global.period, amount: Number(global.amount) }),
+              post({ action: 'set_quick', amount: Number(global.quick) }),
+            ]),
           }, t('save'))),
         data && data.employees.length === 0 && h('p', { className: 'boss-empty' }, t('empty')),
         h('div', { className: 'boss-grid' },
           (data?.employees ?? []).map((employee) => {
-            const draft = drafts[employee.id] ?? { period: employee.wage.period, wage: String(employee.wage.amount) }
+            const draft = drafts[employee.id] ?? {
+              period: employee.wage.period,
+              wage: String(employee.wage.amount),
+              quick: String(employee.verdictAmount),
+            }
             const set = (patch) => setDrafts({ ...drafts, [employee.id]: { ...draft, ...patch } })
             return h('article', { key: employee.id, className: `boss-card${employee.frozen ? ' boss-card-frozen' : ''}` },
               h('div', { className: 'boss-card-head' },
@@ -126,7 +138,22 @@ window.__ModuleLoader__.load({
                   }, t('save')),
                   !employee.inherited && h('button', {
                     type: 'button',
-                    onClick: () => post({ action: 'set_employee', id: employee.id }),
+                    onClick: () => post({ action: 'set_employee', id: employee.id, wage: 0 }),
+                  }, t('useDefault')))),
+              h('details', { className: 'boss-override' },
+                h('summary', null, `${t('ownQuick')} ${yuan(employee.verdictAmount)}`),
+                h('div', { className: 'boss-override-row' },
+                  h('input', {
+                    value: draft.quick, inputMode: 'decimal', 'aria-label': t('quick'),
+                    onChange: (e) => set({ quick: e.target.value }),
+                  }),
+                  h('button', {
+                    type: 'button',
+                    onClick: () => post({ action: 'set_quick', id: employee.id, amount: Number(draft.quick) }),
+                  }, t('save')),
+                  !employee.quickInherited && h('button', {
+                    type: 'button',
+                    onClick: () => post({ action: 'set_employee', id: employee.id, amount: 0 }),
                   }, t('useDefault')))))
           })),
         h('p', { className: 'boss-note' }, t('note')))
@@ -220,16 +247,17 @@ window.__ModuleLoader__.load({
         }).catch((err) => setFailure(err.message))
       }
       if (!employee) return null
-      const label = (kind) => `${kind === 'tip' ? t('tip') : t('fine')} ${yuan(employee.verdictAmount)} · ${t('balance')} ${yuan(employee.balance)}`
+      const amount = yuan(employee.verdictAmount)
+      const label = (kind) => `${kind === 'tip' ? t('tip') : t('fine')} ${amount} · ${t('balance')} ${yuan(employee.balance)}`
       return h(React.Fragment, null,
         h('button', {
           type: 'button', className: 'boss-strip', 'aria-label': label('tip'), title: label('tip'),
           onClick: () => act('tip'),
-        }, h(TipIcon)),
+        }, h(TipIcon), h('span', null, `+${amount}`)),
         h('button', {
           type: 'button', className: 'boss-strip boss-strip-fine', 'aria-label': label('fine'), title: label('fine'),
           onClick: () => act('fine'),
-        }, h(FineIcon)),
+        }, h(FineIcon), h('span', null, `-${amount}`)),
         failure && h('span', { className: 'boss-strip-failure' }, failure))
     }
 
@@ -287,7 +315,8 @@ const css = `
   background: var(--dsw-alias-bg-base); border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px; padding: 5px 9px;
 }
-.boss-defaults input, .boss-override-row input { width: 84px; font-variant-numeric: tabular-nums; }
+.boss-defaults input, .boss-override-row input { width: 72px; font-variant-numeric: tabular-nums; }
+.boss-sep { width: 1px; height: 18px; background: var(--dsw-alias-border-l2); margin: 0 2px; }
 .boss-defaults button, .boss-override-row button { cursor: pointer; }
 .boss-defaults button:hover, .boss-override-row button:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .boss-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 12px; }
@@ -322,11 +351,11 @@ const css = `
 .boss-override-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .boss-note { color: var(--dsw-alias-label-secondary); margin: 16px 0 0; font-size: 12px; }
 .boss-strip {
-  width: 28px; height: 28px; padding: 6px; display: inline-flex; align-items: center; justify-content: center;
+  height: 28px; padding: 4px 8px 4px 6px; gap: 3px; display: inline-flex; align-items: center;
   border: none; border-radius: var(--dsw-radius-sm); background: none; cursor: pointer;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums;
 }
-.boss-strip:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-secondary); }
+.boss-strip:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-state-business-primary); }
 .boss-strip-fine:hover { color: var(--dsw-alias-state-error-primary); }
 .boss-strip-failure { color: var(--dsw-alias-label-tertiary); font-size: 13px; padding-left: 4px; }
 `

@@ -10,8 +10,10 @@ const { apply } = await import('./index.js')
 const agents = []
 const routes = new Map()
 const cleanups = []
+const handlers = []
 const ctx = {
   effect(fn) { cleanups.push(fn()) },
+  on(event, handler) { handlers.push([event, handler]) },
   webServer: { register(route) { routes.set(route.path, route); return () => routes.delete(route.path) } },
   inject(name, fn) { if (name.includes('tools')) return () => {} },
   agents: { list: () => agents },
@@ -48,7 +50,7 @@ out = await call({ action: 'set_employee', id: 'a1', period: 'day', wage: 3 })
 emp = out.body.employees[0]
 assert(emp.wage.amount === 3 && emp.inherited === false, 'employee wage wins over default')
 
-out = await call({ action: 'set_employee', id: 'a1' })
+out = await call({ action: 'set_employee', id: 'a1', wage: 0 })
 emp = out.body.employees[0]
 assert(emp.wage.amount === 70 && emp.inherited === true, 'dropping the override restores the default')
 
@@ -62,6 +64,43 @@ const bad = await call({ action: 'set_wage', period: 'year', amount: 1 })
 assert(bad.status === 400, 'bad period rejected')
 const missing = await call({ action: 'tip', id: 'nope' })
 assert(missing.status === 400, 'unknown employee rejected')
+
+// Prompt awareness: one section per agent, scoped, reading the latest standing.
+const sections = new Map()
+const fakeAgent = (id) => ({
+  id, status: 'idle', options: { model: 'deepseek-flash' },
+  ctx: {
+    effect(fn) { return fn() },
+    systemPrompt: { section(section) { sections.set(id, section); return () => sections.delete(id) } },
+  },
+})
+agents.push({ id: 'prompted', status: 'running', options: { model: 'deepseek-flash' } })
+await call()
+const created = handlers.find(([event]) => event === 'agent/created')[1]
+created({ agent: fakeAgent('prompted') })
+assert(sections.has('prompted'), 'agent gets its own prompt section')
+let prompt = sections.get('prompted').text()
+assert(prompt.includes('余额'), 'standing mentions the balance')
+assert(prompt.includes('70 元/周'), 'standing mentions the inherited wage')
+assert(prompt.includes('打赏或罚款是'), 'standing mentions the tip amount')
+assert(!prompt.includes('停薪'), 'a fresh hire is not paused')
+
+await call({ action: 'fine', id: 'prompted', amount: 4 })
+prompt = sections.get('prompted').text()
+assert(prompt.includes('-74.00'), `standing follows the balance, got ${prompt.split('\n')[0]}`)
+assert(prompt.includes('余额为负'), 'negative balance is explained')
+// Global default tip amount, then an employee override.
+out = await call({ action: 'set_quick', amount: 5 })
+assert(out.body.settings.verdictAmount === 5, 'global tip amount saved')
+emp = out.body.employees[0]
+assert(emp.verdictAmount === 5 && emp.quickInherited === true, 'employees inherit the global amount')
+out = await call({ action: 'tip', id: 'a1' })
+assert(out.body.employees[0].balance === -2, `tip used the global amount, got ${out.body.employees[0].balance}`)
+out = await call({ action: 'set_quick', id: 'a1', amount: 3 })
+assert(out.body.employees[0].verdictAmount === 3 && out.body.employees[0].quickInherited === false, 'own amount wins')
+out = await call({ action: 'set_employee', id: 'a1', amount: 0 })
+assert(out.body.employees[0].verdictAmount === 5 && out.body.employees[0].quickInherited === true, 'clearing restores global')
+assert(out.body.employees[0].inherited === true, 'clearing the tip amount left the wage alone')
 
 server.close()
 for (const dispose of cleanups) dispose()
