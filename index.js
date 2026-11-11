@@ -51,15 +51,11 @@ export function apply(ctx) {
 function bossTool(queue, ctx) {
   return {
     name: 'boss_payroll',
-    description: '员工名册与工资体系。余额是员工身价，越高越好。action: list | set_wage（全局工资）| set_employee（单个员工工资/单次奖惩额度）| set_quick | pay | tip | fine。token 费用自动从余额扣除，停摆超过一个发薪周期的员工停止发薪。',
+    description: '查看工资与性价比。action: self（自己的工资卡：余额、累计收入、token 成本、性价比）| list（排行榜：各员工的性价比与利润排名，不含他人余额）。工资、打赏、罚款只能由老板操作，agent 不能给自己或同事发钱。',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'set_wage', 'set_employee', 'set_quick', 'pay', 'tip', 'fine'] },
-        id: { type: 'string', description: '员工 id，即 agent / session id' },
-        period: { type: 'string', enum: ['day', 'week', 'month'] },
-        amount: { type: 'number', description: '金额（元）；tip/fine 省略时走单次额度' },
-        wage: { type: 'number', description: 'set_employee 的个体工资；省略则清除个体配置，回到全局' },
+        action: { type: 'string', enum: ['self', 'list'] },
       },
       required: ['action'],
     },
@@ -67,16 +63,19 @@ function bossTool(queue, ctx) {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
-    execute: (args) => act(queue, ctx, args),
+    execute: (args, exec) => act(queue, ctx, { ...args, actor: String(exec?.agent?.id ?? '') }),
   }
 }
 
+/** Mutating actions exist only on the boss's own surface; a tool call is always an agent call. */
+const BOSS_ACTIONS = new Set(['list', 'set_wage', 'set_employee', 'set_quick', 'pay', 'tip', 'fine'])
+
 async function handle(req, res, queue, ctx) {
   try {
-    if (req.method === 'GET') return send(res, 200, await act(queue, ctx, { action: 'list' }))
+    if (req.method === 'GET') return send(res, 200, await act(queue, ctx, { action: 'list', boss: true }))
     if (req.method !== 'POST') return send(res, 405, { error: 'GET or POST' })
     const args = JSON.parse(await readBody(req))
-    const result = await act(queue, ctx, args)
+    const result = await act(queue, ctx, { ...args, boss: true })
     send(res, result.error ? 400 : 200, result)
   } catch (error) {
     send(res, 500, { error: error.message })
@@ -87,7 +86,14 @@ function act(queue, ctx, args) {
   return queue.push(() => {
     const ledger = load()
     settle(ctx, ledger)
-    if (args.action === 'list') return present(ledger, ctx, new Date())
+    if (args.action === 'self' || args.action === 'list') {
+      const view = present(ledger, ctx, new Date())
+      if (args.boss) return view
+      return args.action === 'list' ? boardFor(view, args.actor) : stripFor(view, args.actor)
+    }
+    if (args.boss !== true) {
+      return { error: `只有老板能改工资、打赏或罚款，agent 不能给自己或同事发钱（${args.action}）` }
+    }
     const wageOf = (employee) => employee.wage ?? ledger.settings.wage
     if (args.action === 'set_wage') {
       if (!['day', 'week', 'month'].includes(args.period) || !(args.amount > 0)) return { error: '工资要选 day/week/month，金额要大于 0' }
@@ -168,7 +174,7 @@ function ensure(ledger, id, now) {
     ledger.employees[id] = {
       id, hiredAt: at, lastPaidAt: at, workedAt: now.getTime(), lastSeenAt: now.getTime(), model: '',
       wage: null, balance: money(-wage.amount), tokenCost: 0, billed: null,
-      tipTotal: 0, fineTotal: 0, verdictAmount: null,
+      tipTotal: 0, fineTotal: 0, wageTotal: 0, verdictAmount: null,
     }
   }
   return ledger.employees[id]
@@ -188,6 +194,25 @@ function modelOf(agent) {
   return String(config?.model || agent.options?.model || '')
 }
 
+/** One employee's row without everyone else's balances, so a peer's money stays private. */
+function stripFor(view, id) {
+  const own = view.employees.find((employee) => employee.id === id)
+  return own ? { self: own, others: view.employees.length - 1 } : { error: '还没有你的工资记录' }
+}
+
+/** Ranked roster without other people's exact balances. */
+function boardFor(view, id) {
+  return {
+    you: view.employees.find((employee) => employee.id === id) ?? null,
+    board: view.employees.map((employee) => ({
+      id: employee.id,
+      rank: employee.rank,
+      efficiency: employee.efficiency,
+      profit: employee.profit,
+    })),
+  }
+}
+
 const quickOf = (employee, ledger) => employee.verdictAmount ?? ledger.settings.verdictAmount
 
 function present(ledger, ctx, now) {
@@ -196,9 +221,16 @@ function present(ledger, ctx, now) {
     const wage = employee.wage ?? ledger.settings.wage
     const at = now.getTime()
     const verdictAmount = quickOf(employee, ledger)
+    const wageTotal = employee.wageTotal ?? 0
+    const earned = money(wageTotal + employee.tipTotal - employee.fineTotal)
+    const cost = employee.tokenCost ?? 0
     return {
       ...employee,
       wage,
+      wageTotal,
+      earned,
+      profit: money(earned - cost),
+      efficiency: cost > 0 ? money(earned / cost) : null,
       verdictAmount,
       quickInherited: employee.verdictAmount === null || employee.verdictAmount === undefined,
       inherited: employee.wage === null,
@@ -226,14 +258,19 @@ const PERIOD_NAMES = { day: '天', week: '周', month: '月' }
 
 function describeStanding(employee) {
   const wage = `${employee.wage.amount} 元/${PERIOD_NAMES[employee.wage.period] ?? employee.wage.period}`
+  const earned = money((employee.wageTotal ?? 0) + employee.tipTotal - employee.fineTotal)
+  const cost = employee.tokenCost ?? 0
   const lines = [
     `你的工资卡：余额 ${employee.balance.toFixed(2)} 元（正数是存款，负数是欠公司的钱），工资 ${wage}${employee.inherited ? '（全局默认）' : '（单独设定）'}。`,
-    `打赏 ${employee.tipTotal.toFixed(2)} 元，罚款 ${employee.fineTotal.toFixed(2)} 元。每消耗 token 的费用都从余额里扣，所以干得越多花得越多。`,
+    `累计收入 ${earned.toFixed(2)} 元（工资 ${(employee.wageTotal ?? 0).toFixed(2)} + 打赏 ${employee.tipTotal.toFixed(2)} - 罚款 ${employee.fineTotal.toFixed(2)}），累计 token 成本 ${cost.toFixed(2)} 元。`,
+    cost > 0
+      ? `当前性价比 ${(earned / cost).toFixed(2)}：每花公司 1 元 token，你赚回 ${(earned / cost).toFixed(2)} 元。这个数低于 1 就是亏本，越高越好。`
+      : '还没有 token 成本，性价比尚未产生。',
     `老板每次点打赏或罚款是 ${employee.verdictAmount.toFixed(2)} 元。`,
   ]
   if (employee.frozen) lines.push('你已停薪：整整一个发薪周期没有干活，工资暂停，开始工作后自动恢复。')
   if (employee.balance < 0) lines.push('余额为负说明你还在还欠薪，第一次发薪后才会转正。')
-  lines.push('老板会在回复下面用打赏或罚款按钮评价你的工作质量。')
+  lines.push('所以：用尽量少的 token 把活干对、干完，打赏才会持续高于成本；反复试错和冗长输出都在烧你自己的钱。')
   return lines.join('\n')
 }
 
@@ -276,6 +313,7 @@ function migrate(data) {
       billed: old.billed ?? null,
       tipTotal: old.tipTotal ?? 0,
       fineTotal: old.fineTotal ?? 0,
+      wageTotal: 0,
       verdictAmount: old.verdictAmount ?? null,
     }
   }
@@ -292,6 +330,7 @@ function load() {
     employee.wage ??= null
     employee.tipTotal ??= 0
     employee.fineTotal ??= 0
+    employee.wageTotal ??= 0
     employee.verdictAmount ??= null
     employee.workedAt ??= 0
     employee.lastSeenAt ??= 0

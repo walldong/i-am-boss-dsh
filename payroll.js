@@ -70,6 +70,7 @@ export function accrueWages(employee, nowMs, wage) {
     if (due > nowMs) break
     if (employee.workedAt >= cursor) {
       employee.balance = money(employee.balance + wage.amount)
+      employee.wageTotal = money((employee.wageTotal ?? 0) + wage.amount)
       paid = money(paid + wage.amount)
     }
     cursor = due
@@ -107,10 +108,11 @@ function demo() {
   assert(!isFrozen(emp, wage, Date.parse('2026-11-01T20:00:00.000Z')), 'worked this period')
   assert(accrueWages(emp, Date.parse('2026-11-02T00:00:00.000Z'), wage) === 10, 'one worked day')
   assert(emp.balance === 0, 'debt settled by the first payday')
+  assert(emp.wageTotal === 10, 'running wage total')
   assert(isFrozen(emp, wage, Date.parse('2026-11-02T12:00:00.000Z')), 'idle a whole period')
   const paidAt = { ...emp, lastPaidAt: '2026-11-02T00:00:00.000Z' }
   assert(accrueWages(paidAt, Date.parse('2026-11-05T00:00:00.000Z'), wage) === 0, 'idle periods pay nothing')
-  assert(paidAt.balance === 0, 'frozen balance unchanged')
+  assert(paidAt.balance === 0 && paidAt.wageTotal === 10, 'frozen balance and total unchanged')
   const never = { balance: -10, lastPaidAt: '2026-11-01T00:00:00.000Z', hiredAt: '2026-11-01T00:00:00.000Z', workedAt: 0 }
   assert(accrueWages(never, Date.parse('2026-11-03T00:00:00.000Z'), wage) === 0, 'no work, no pay')
   assert(never.balance === -10, 'debt stays')

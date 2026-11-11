@@ -11,11 +11,15 @@ const agents = []
 const routes = new Map()
 const cleanups = []
 const handlers = []
+const tools = new Map()
 const ctx = {
   effect(fn) { cleanups.push(fn()) },
   on(event, handler) { handlers.push([event, handler]) },
   webServer: { register(route) { routes.set(route.path, route); return () => routes.delete(route.path) } },
-  inject(name, fn) { if (name.includes('tools')) return () => {} },
+  inject(name, fn) {
+    if (name.includes('tools')) return fn({ register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name) } })
+    return () => {}
+  },
   agents: { list: () => agents },
   sessionProjections: { stateOf: (session, key) => session.usage?.[key] },
 }
@@ -31,6 +35,11 @@ const call = async (body) => {
     ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
     : {})
   return { status: res.status, body: await res.json() }
+}
+
+const toolCall = async (body, exec) => {
+  const registered = tools.get('boss_payroll')
+  return registered.execute({ ...body }, exec)
 }
 
 const assert = (cond, msg) => { if (!cond) throw new Error(msg) }
@@ -101,6 +110,42 @@ assert(out.body.employees[0].verdictAmount === 3 && out.body.employees[0].quickI
 out = await call({ action: 'set_employee', id: 'a1', amount: 0 })
 assert(out.body.employees[0].verdictAmount === 5 && out.body.employees[0].quickInherited === true, 'clearing restores global')
 assert(out.body.employees[0].inherited === true, 'clearing the tip amount left the wage alone')
+
+// Agents read their own standing and the efficiency board, but never move money.
+const agentTool = await toolCall({ action: 'self' }, { agent: { id: 'a1' } })
+assert(agentTool.self.id === 'a1', 'self returns the calling employee')
+assert(agentTool.self.efficiency !== undefined, 'self carries efficiency')
+assert(!('employees' in agentTool), 'self does not leak the roster')
+
+const blockedTip = await toolCall({ action: 'tip', id: 'a1', amount: 999 }, { agent: { id: 'a1' } })
+assert(String(blockedTip.error).includes('只有老板'), `agent cannot tip, got ${JSON.stringify(blockedTip)}`)
+const blockedWage = await toolCall({ action: 'set_wage', period: 'day', amount: 999 }, { agent: { id: 'a1' } })
+assert(String(blockedWage.error).includes('只有老板'), 'agent cannot set wages')
+out = await call()
+assert(out.body.employees[0].balance === -2, 'blocked tool calls moved no money')
+
+const board = await toolCall({ action: 'list' }, { agent: { id: 'a1' } })
+assert(board.you.id === 'a1', 'list names the caller')
+assert(!('balance' in board.board[0]), 'the board hides other balances')
+assert(board.board[0].efficiency !== undefined, 'the board ranks by efficiency')
+
+// Efficiency: earned money against token cost. The first sight of a log is a baseline, so bump it.
+agents[0].session = { usage: { tokenUsage: { totals: { uncachedInputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } } } }
+await call()
+agents[0].session.usage.tokenUsage.totals.uncachedInputTokens = 5_000_000
+out = await call()
+emp = out.body.employees[0]
+assert(emp.tokenCost === 4, `four million delta miss tokens cost 4 CNY off-peak, got ${emp.tokenCost}`)
+const earned = emp.wageTotal + emp.tipTotal - emp.fineTotal
+assert(emp.earned === earned, `earned = wage + tip - fine, got ${emp.earned}`)
+assert(emp.profit === earned - emp.tokenCost, `profit = earned - cost, got ${emp.profit}`)
+assert(emp.efficiency === Math.round((earned / emp.tokenCost) * 1e6) / 1e6, `efficiency = earned / cost, got ${emp.efficiency}`)
+assert(emp.efficiency > 1, 'a cheap agent shows a positive return')
+
+// The prompt states the same economics the panel shows.
+const later = sections.get('prompted').text()
+assert(later.includes('性价比'), 'standing teaches the efficiency target')
+assert(later.includes('token 成本'), 'standing names the token cost')
 
 server.close()
 for (const dispose of cleanups) dispose()

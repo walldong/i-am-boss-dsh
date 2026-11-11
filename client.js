@@ -10,6 +10,7 @@ window.__ModuleLoader__.load({
       offline: 'Host API is not up. Install this bundle and restart Harness.',
       running: 'running', idle: 'idle', off: 'offline',
       balance: 'Balance', wage: 'Wage', tipTotal: 'Tipped', fineTotal: 'Fined',
+      efficiency: 'Return', earned: 'Earned', tokenCost: 'Token cost',
       frozen: 'paused', 'per.day': '/day', 'per.week': '/week', 'per.month': '/month',
       defaults: 'Default wage', quick: 'Per tip/fine',
       override: 'Own wage', useDefault: 'Use default', ownQuick: 'Own amount',      save: 'Save',
@@ -22,6 +23,7 @@ window.__ModuleLoader__.load({
       offline: '没有连上宿主接口。安装本插件并重启 Harness。',
       running: '在跑', idle: '空闲', off: '离线',
       balance: '余额', wage: '工资', tipTotal: '总打赏', fineTotal: '总罚款',
+      efficiency: '性价比', earned: '收入', tokenCost: 'token 成本',
       frozen: '停薪', 'per.day': '/天', 'per.week': '/周', 'per.month': '/月',
       defaults: '默认工资', quick: '每次打赏/罚款',
       override: '单独工资', useDefault: '用默认', ownQuick: '单独额度',
@@ -121,6 +123,15 @@ window.__ModuleLoader__.load({
                 stat(t('wage'), `${yuan(employee.wage.amount)}${periodLabel(t, employee.wage.period)}`, employee.inherited),
                 stat(t('tipTotal'), `+${yuan(employee.tipTotal)}`, false, 'boss-good'),
                 stat(t('fineTotal'), `-${yuan(employee.fineTotal)}`, false, 'boss-debt')),
+              h('div', { className: 'boss-roi' },
+                h('span', null,
+                  h('span', { className: 'boss-label' }, t('efficiency')), ' ',
+                  h('b', {
+                    className: employee.efficiency === null ? '' : employee.efficiency >= 1 ? 'boss-good' : 'boss-debt',
+                    title: `${t('earned')} ${yuan(employee.earned)} − ${t('tokenCost')} ${yuan(employee.tokenCost)}`,
+                  }, employee.efficiency === null ? '—' : `×${employee.efficiency.toFixed(2)}`)),
+                h('span', { className: 'boss-roi-detail' },
+                  `${t('earned')} ${yuan(employee.earned)} · ${t('tokenCost')} ${yuan(employee.tokenCost)}`)),
               h('details', { className: 'boss-override' },
                 h('summary', null, employee.inherited ? t('override') : t('wage')),
                 h('div', { className: 'boss-override-row' },
@@ -345,6 +356,9 @@ const css = `
 .boss-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 0; }
 .boss-stats dt { color: var(--dsw-alias-label-tertiary); font-size: 11px; }
 .boss-stats dd { margin: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.boss-roi { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.boss-roi b { font-size: 13px; font-variant-numeric: tabular-nums; }
+.boss-roi-detail { color: var(--dsw-alias-label-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
 .boss-inherited { color: var(--dsw-alias-label-tertiary); }
 .boss-override { margin-top: 10px; }
 .boss-override summary { cursor: pointer; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
