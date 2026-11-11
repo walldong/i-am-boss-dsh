@@ -1,6 +1,20 @@
 # i-am-boss-dsh
 
-DeepSeek Harness 插件：把正在运行的 agent 当员工管理，按日 / 周 / 月发工资，token 费用从员工自己的工资余额里扣。
+把 DeepSeek Harness 里正在运行的 agent 当员工管理：**按日 / 周 / 月发工资，按性价比打赏或罚款，token 费用从员工自己的工资里扣。**
+
+[![DSH](https://img.shields.io/badge/DeepSeek%20Harness-%E2%89%A5%200.2.1-1f6b4a)](https://github.com/deepseek-ai/deepseek-harness)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+> 员工花公司的 token 是要还的。干得好拿打赏，干得差被罚款，烧太多就欠薪 —— 于是它自己会算这笔账。
+
+## 它解决什么
+
+agent 跑起来之后，你通常只知道"它花了多少钱"，不知道"值不值"。这个插件把每个 agent 变成一个员工账户：
+
+- 每轮对话的 token 钱按 DeepSeek 官方牌价算出来，从它的工资余额里扣；
+- 每条回复下面点一下就打赏或罚款，按完成质量给；
+- 卡片上直接显示「性价比」= 收入 ÷ token 成本，低于 1 就是亏本；
+- 这句话也写进 agent 自己的系统提示里，所以它会主动省 token、少试错。
 
 ## 功能
 
@@ -8,11 +22,10 @@ DeepSeek Harness 插件：把正在运行的 agent 当员工管理，按日 / �
 - 身价评分：余额就是员工的身价，越高越好，卡片按余额排序。
 - 先欠后付：入职时先记一期工资的负余额，第一次发薪才转正；一个发薪周期没有产生 token 消耗就停薪，重新干活才恢复。
 - 工资配置：全局一套「金额 + 周期」和「单次打赏/罚款额度」，员工可分别覆盖，个体优先；去掉覆盖即回到全局。
-- 打赏 / 罚款：每条回复下方两个按钮，写着 `+1.00` / `-1.00` 这种带符号的金额，点一下直接生效，不填理由。额度可在面板顶部统一配置，也能按员工单独设，个体优先。卡片显示累计总打赏与总罚款。
-- 性价比：卡片显示「收入 ÷ token 成本」的回报倍数（`×2.40`），低于 1 就是亏本。收入 = 累计工资 + 打赏 − 罚款，成本是它烧掉的 token 钱。
-- 工资感知：每个 agent 的系统提示里有一段自己的工资卡（余额、工资、累计收入、token 成本、当前性价比、是否停薪），随结算刷新，并明确告诉它「少烧 token 干对活」才是最优策略。
-- 权限：改工资、打赏、罚款只能由你在面板或回复按钮上操作。agent 侧的工具只有 `self`（看自己）和 `list`（只看性价比排行榜，不含他人余额），不能给自己或同事发钱。
-- Token 计量：读 `tokenUsage` 投影的未命中输入 / 缓存命中 / 缓存写出 / 输出四个桶，按 DeepSeek 牌价折算成钱并从余额扣除。
+- 打赏 / 罚款：每条回复下方两个按钮，写着 `+1.00` / `-1.00` 这种带符号的金额，点一下直接生效，不填理由。
+- 性价比：卡片显示「收入 ÷ token 成本」的回报倍数（`×2.40`），低于 1 就是亏本。收入 = 累计工资 + 打赏 − 罚款。
+- 工资感知：每个 agent 的系统提示里有一段自己的工资卡，随结算刷新，明确告诉它「少烧 token 干对活」才是最优策略。
+- 权限：改工资、打赏、罚款只能由你操作。agent 的工具只有 `self`（看自己）和 `list`（性价比排行榜，不含他人余额），不能给自己或同事发钱。
 - Agent 工具：`boss_payroll`，`action` 为 `self | list`。
 
 ## 计价
@@ -28,13 +41,29 @@ DeepSeek Harness 插件：把正在运行的 agent 当员工管理，按日 / �
 
 ## 安装
 
-Harness 的 **Plugins** 页安装本目录，或用插件工具：
+**从 GitHub 安装**（不需要 npm 发布）：
+
+```
+dsh plugin --profile desktop add github:walldong/i-am-boss-dsh
+```
+
+或在 Harness **Plugins** 页添加 `github:walldong/i-am-boss-dsh`。安装后重启 Harness，左侧栏出现「员工」。
+
+**从源码**（改代码时）：
 
 ```
 plugin_manager action=install_bundle target=/绝对路径/i-am-boss-dsh
 ```
 
-安装后重启 Harness，左侧栏出现「员工」。宿主编译版本没有 HMR 时，改完代码需要重启。
+更新：`dsh plugin --profile desktop update i-am-boss-dsh`，之后必须重启。宿主编译版本没有 HMR 时，改完代码同样要重启。
+
+## 加入插件市场
+
+DSH 没有官方市场，Discover 读的是社区索引。本仓库已打 `dsh-plugin` topic，会被 [dsh-plugin-index](https://github.com/whoishuhu/dsh-plugin-index) 次日自动收录；也可以直接添加本仓库自带的索引：
+
+```
+https://raw.githubusercontent.com/walldong/i-am-boss-dsh/main/market/index.json
+```
 
 ## 结构
 

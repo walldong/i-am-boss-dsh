@@ -2,7 +2,7 @@
   "name": "i-am-boss-dsh",
   "version": "1.5.0",
   "private": false,
-  "description": "Monitor running DeepSeek Harness agents, pay wages, and deduct token cost from each employee.",
+  "description": "把 DeepSeek Harness 里正在运行的 agent 当员工管理：按日/周/月发工资，按性价比打赏或罚款，token 费用从员工自己的工资里扣。",
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -11,7 +11,19 @@
     "./icon": "./icon.svg"
   },
   "files": ["index.js", "payroll.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg", "README.md", "LICENSE"],
-  "keywords": ["dsh", "deepseek-harness", "plugin", "agent", "payroll"],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "plugin",
+    "agent",
+    "payroll",
+    "salary",
+    "token",
+    "cost",
+    "budget",
+    "agent-management"
+  ],
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/walldong/i-am-boss-dsh.git" },
   "dsh": {
