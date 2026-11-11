@@ -57,6 +57,18 @@ node --check index.js && node payroll.js
 git tag v1.0.0 && git push origin v1.0.0
 ```
 
+## 插件市场
+
+DSH **没有官方市场**，Discover 只列你手动添加的索引（格式 1 的 JSON）。本仓库自带一份：
+
+```
+https://raw.githubusercontent.com/walldong/i-am-boss-dsh/main/market/index.json
+```
+
+在 Plugins → More → 开启 **Custom plugin markets** → Discover 里粘贴上面这个 URL 即可搜到。索引里的版本用 `git` source + commit SHA 固定，`npm` 发布后可改成 `{"type":"npm"}`。
+
+改完 `market/index.json` 用 DSH 自带的 `@deepseek-ai/dsh-plugin-market-index` 的 `parseMarketIndex` 校验，和 Discover 读的是同一套规则；版本按 SemVer 降序，`publishTimestamp` 是 Unix 秒。
+
 ## License
 
 MIT

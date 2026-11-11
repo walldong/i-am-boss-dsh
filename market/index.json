@@ -1,0 +1,47 @@
+{
+  "format": 1,
+  "title": "i-am-boss plugins",
+  "description": "Agent payroll and employee management for DeepSeek Harness.",
+  "metadata": {
+    "categories": {
+      "management": { "title": { "en": "Management", "zh": "管理" } }
+    },
+    "labels": {
+      "agents": { "title": { "en": "Agents", "zh": "Agent" } },
+      "cost": { "title": { "en": "Cost", "zh": "成本" } }
+    }
+  },
+  "plugins": [
+    {
+      "name": "i-am-boss-dsh",
+      "title": { "en": "Payroll", "zh": "员工工资" },
+      "description": {
+        "en": "Watch running agents, rank them by balance, pay daily/weekly/monthly wages, and deduct token cost from each employee.",
+        "zh": "监视正在运行的 agent，按余额排身价，按日/周/月发工资，token 费用从员工工资里扣。"
+      },
+      "icon": "../icon.svg",
+      "author": "walldong",
+      "homepage": "https://github.com/walldong/i-am-boss-dsh",
+      "repository": {
+        "url": "https://github.com/walldong/i-am-boss-dsh"
+      },
+      "metadata": {
+        "category": "management",
+        "keywords": ["payroll", "agent", "token", "cost", "wage"],
+        "labels": ["agents", "cost"]
+      },
+      "versions": [
+        {
+          "version": "1.1.0",
+          "publishTimestamp": 1794390346,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/walldong/i-am-boss-dsh",
+            "commit": "687d592b9c5d95115cc1bd1e3c1333817e2a1018"
+          },
+          "engines": { "dsh": ">=0.2.1-rc.5" }
+        }
+      ]
+    }
+  ]
+}
