@@ -61,8 +61,7 @@ export function nextDue(fromMs, period) {
   return fromMs + PERIOD_MS[period]
 }
 
-/** Credit elapsed periods, at most 36 per call. ponytail: cap per settle; the next settle continues. */
-export function accrueWages(employee, nowMs) {
+/** Credit elapsed periods, at most 36 per call. ponytail: cap per settle; the next settle continues. */export function accrueWages(employee, nowMs) {
   let paid = 0
   let cursor = Date.parse(employee.lastPaidAt)
   for (let n = 0; n < 36; n++) {
@@ -76,8 +75,7 @@ export function accrueWages(employee, nowMs) {
   return paid
 }
 
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg)
+function assert(cond, msg) {  if (!cond) throw new Error(msg)
 }
 
 function demo() {

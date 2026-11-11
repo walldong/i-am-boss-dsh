@@ -7,9 +7,9 @@ DeepSeek Harness 插件：把正在运行的 agent 当员工管理，按日 / �
 - 自动入职：`ctx.agents.list()` 里出现的 agent 直接进名册，显示 `running` / `idle` / `offline` 和模型。
 - 身价评分：余额就是员工的身价，越高越好，名册按余额排名。
 - 工资体系：每个员工一份 `{ period, amount }`，可设 day / week / month，到期自动入账（最多每次补 36 期）。
-- 打赏 / 罚款：任务跑完后按完成质量 `tip` 或 `fine`，带理由，保留最近 20 条奖惩记录。
+- 打赏 / 罚款：每条回复下方有两个箭头图标，点一下就按该员工的「单次额度」打赏或罚款，不填理由；面板里也能改这个额度。保留最近 20 条奖惩记录。
 - Token 计量：读 `tokenUsage` 投影的未命中输入 / 缓存命中 / 缓存写出 / 输出四个桶，按 DeepSeek 牌价折算成钱并从余额扣除 —— 干得差的员工会被自己的消耗拖成欠薪。入职前已产生的用量不补扣。
-- Agent 工具：`boss_payroll`，`action` 为 `list | set_wage | pay | tip | fine`。
+- Agent 工具：`boss_payroll`，`action` 为 `list | set_wage | pay | set_quick | tip | fine`。
 
 ## 计价
 

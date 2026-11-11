@@ -13,9 +13,9 @@ window.__ModuleLoader__.load({
       miss: 'miss', hit: 'hit', write: 'write', out: 'out',
       wage: 'Set wage', pay: 'Pay one period', tip: 'Tip', fine: 'Fine',
       balance: 'Balance', score: 'Score',
-      verdicts: 'Verdicts', noteHint: 'Why? e.g. fixed the login bug',
-      amountFirst: 'Enter an amount first.',
-      note: 'Balance is the employee’s score: higher is better. Token fees come out of that balance, so a good agent has to earn it back. After a task, tip or fine it for the quality. Off-peak DeepSeek list prices, peak ×2.',
+      verdicts: 'Verdicts', quickHint: 'Tip/fine per click',
+      saveQuick: 'Save amount',
+      note: 'Balance is the employee’s score: higher is better. Token fees come out of that balance. Tip or fine each finished turn from the icons under the reply.',
     }
     const zh = {
       panel: '员工',
@@ -27,9 +27,9 @@ window.__ModuleLoader__.load({
       miss: '未命中', hit: '命中', write: '写出', out: '输出',
       wage: '设工资', pay: '发一期', tip: '打赏', fine: '罚款',
       balance: '余额', score: '身价',
-      verdicts: '奖惩记录', noteHint: '理由，例如「修好了登录 bug」',
-      amountFirst: '先填金额。',
-      note: '余额就是员工的身价评分，越高越好。token 费用从余额里扣，干得差的会被自己的消耗拖垮。任务跑完按质量打赏或罚款。入职前的消耗不补扣。按 DeepSeek 闲时牌价，高峰 ×2。',
+      verdicts: '奖惩记录', quickHint: '单次打赏/罚款金额',
+      saveQuick: '存为单次额度',
+      note: '余额就是员工的身价，越高越好。token 费用从余额里扣。任务跑完，在回复下面用图标直接打赏或罚款。',
     }
 
     function Page(props) {
@@ -50,7 +50,11 @@ window.__ModuleLoader__.load({
         const timer = setInterval(load, 5000)
         return () => clearInterval(timer)
       }, [load])
-      const rowDraft = (id, employee) => draft[id] || { period: employee.wage.period, amount: String(employee.wage.amount), note: '' }
+      const rowDraft = (id, employee) => draft[id] || {
+        period: employee.wage.period,
+        wageAmount: String(employee.wage.amount),
+        quick: String(employee.verdictAmount),
+      }
       const post = (body) => fetch('/i-am-boss/api', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
       }).then(async (res) => {
@@ -60,7 +64,6 @@ window.__ModuleLoader__.load({
       })
 
       return h('div', { style: pageStyle },
-        h('style', null, css),
         h('header', { className: 'boss-head' },
           h('h1', null, t('title')),
           data && h('span', null, `${data.employees.filter((e) => e.status === 'running').length} ${t('running')} · ${data.peak ? t('peak') : t('offpeak')}`)),
@@ -71,10 +74,6 @@ window.__ModuleLoader__.load({
           const form = rowDraft(employee.id, employee)
           const set = (patch) => setDraft({ ...draft, [employee.id]: { ...form, ...patch } })
           const tokens = employee.billed || {}
-          const verdict = (kind) => {
-            if (!(Number(form.amount) > 0)) return setError(t('amountFirst'))
-            post({ action: kind, id: employee.id, amount: Number(form.amount), note: form.note })
-          }
           return h('article', { key: employee.id, className: 'boss-card' },
             h('div', { className: 'boss-id' },
               h('span', { className: 'boss-rank' }, `#${employee.rank}`),
@@ -91,22 +90,23 @@ window.__ModuleLoader__.load({
               row('工资', `${yuan(employee.wage.amount)} / ${employee.wage.period}`),
               row('下次发薪', new Date(employee.nextPayAt).toLocaleString())),
             h('div', { className: 'boss-actions' },
-              h('input', { value: form.amount, 'aria-label': 'amount', inputMode: 'decimal', placeholder: '0.00', onChange: (e) => set({ amount: e.target.value }) }),
-              h('input', { value: form.note, 'aria-label': 'note', className: 'boss-note-input', placeholder: t('noteHint'), onChange: (e) => set({ note: e.target.value }) }),
-              h('button', { type: 'button', onClick: () => verdict('tip') }, t('tip')),
-              h('button', { type: 'button', className: 'boss-danger', onClick: () => verdict('fine') }, t('fine'))),
+              h('input', { value: form.quick, 'aria-label': t('quickHint'), inputMode: 'decimal', placeholder: t('quickHint'), onChange: (e) => set({ quick: e.target.value }) }),
+              h('button', { type: 'button', onClick: () => post({ action: 'set_quick', id: employee.id, amount: Number(form.quick) }) }, t('saveQuick')),
+              h('button', { type: 'button', onClick: () => post({ action: 'tip', id: employee.id }) }, `▲ ${t('tip')} ${yuan(employee.verdictAmount)}`),
+              h('button', { type: 'button', className: 'boss-danger', onClick: () => post({ action: 'fine', id: employee.id }) }, `▼ ${t('fine')} ${yuan(employee.verdictAmount)}`)),
             h('details', { className: 'boss-actions-row' },
               h('summary', null, t('wage')),
               h('div', { className: 'boss-actions' },
                 h('select', { value: form.period, 'aria-label': 'period', onChange: (e) => set({ period: e.target.value }) },
                   ['day', 'week', 'month'].map((period) => h('option', { key: period, value: period }, period))),
-                h('button', { type: 'button', onClick: () => post({ action: 'set_wage', id: employee.id, period: form.period, amount: Number(form.amount) }) }, t('wage')),
+                h('input', { value: form.wageAmount, 'aria-label': 'wage', inputMode: 'decimal', onChange: (e) => set({ wageAmount: e.target.value }) }),
+                h('button', { type: 'button', onClick: () => post({ action: 'set_wage', id: employee.id, period: form.period, amount: Number(form.wageAmount) }) }, t('wage')),
                 h('button', { type: 'button', onClick: () => post({ action: 'pay', id: employee.id }) }, t('pay')))),
             (employee.verdicts || []).length > 0 && h('details', { className: 'boss-actions-row' },
               h('summary', null, `${t('verdicts')} (${employee.verdicts.length})`),
               h('ul', { className: 'boss-log' }, employee.verdicts.slice().reverse().map((item, index) => h('li', { key: index },
                 h('span', { className: item.kind === 'tip' ? 'boss-tip' : 'boss-debt' }, `${item.kind === 'tip' ? '+' : '-'}${yuan(item.amount)}`),
-                ` ${new Date(item.at).toLocaleString()}${item.note ? ` · ${item.note}` : ''}`)))))
+                ` ${new Date(item.at).toLocaleString()}`)))))
         }))
     }
 
@@ -126,14 +126,84 @@ window.__ModuleLoader__.load({
         h('circle', { cx: 17, cy: 15, r: 3.2 }))
     }
 
+    /** One shared read of the roster, so each reply does not refetch it. */
+    const rosterCache = { at: 0, employees: [] }
+    function readRoster() {
+      if (Date.now() - rosterCache.at < 15_000) return Promise.resolve(rosterCache.employees)
+      return fetch('/i-am-boss/api').then((res) => res.json()).then((body) => {
+        rosterCache.employees = body.employees || []
+        rosterCache.at = Date.now()
+        return rosterCache.employees
+      })
+    }
+
+    /** Tip / fine icons under one finished reply; the amount is the employee's per-click value. */
+    function TurnVerdict({ id, t }) {
+      const [employee, setEmployee] = React.useState(null)
+      const [failure, setFailure] = React.useState('')
+      const load = React.useCallback(() => {
+        readRoster().then((employees) => {
+          setEmployee(employees.find((item) => item.id === id) || null)
+        }).catch(() => {})
+      }, [id])
+      React.useEffect(load, [load])
+      const act = (kind) => {
+        fetch('/i-am-boss/api', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: kind, id }),
+        }).then(async (res) => {
+          const body = await res.json().catch(() => ({}))
+          if (!res.ok) throw new Error(body.error || String(res.status))
+          rosterCache.employees = body.employees || []
+          rosterCache.at = Date.now()
+          setEmployee(rosterCache.employees.find((item) => item.id === id) || null)
+          setFailure('')
+        }).catch((err) => setFailure(err.message))
+      }
+      if (!employee) return null
+      const amount = yuan(employee.verdictAmount)
+      const label = (kind) => `${kind === 'tip' ? t('tip') : t('fine')} ${amount} · ${t('balance')} ${yuan(employee.balance)}`
+      return h(React.Fragment, null,
+        h('button', {
+          type: 'button', className: 'boss-strip', 'aria-label': label('tip'), title: label('tip'),
+          onClick: () => act('tip'),
+        }, h(TipIcon)),
+        h('button', {
+          type: 'button', className: 'boss-strip boss-strip-fine', 'aria-label': label('fine'), title: label('fine'),
+          onClick: () => act('fine'),
+        }, h(FineIcon)),
+        failure && h('span', { className: 'boss-strip-failure' }, failure))
+    }
+
+    function TipIcon() {
+      return h('svg', { viewBox: '0 0 16 16', width: 15, height: 15, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.3 },
+        h('path', { d: 'M8 13V3M8 3 4.5 6.5M8 3l3.5 3.5' }))
+    }
+
+    function FineIcon() {
+      return h('svg', { viewBox: '0 0 16 16', width: 15, height: 15, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.3 },
+        h('path', { d: 'M8 3v10M8 13 4.5 9.5M8 13l3.5-3.5' }))
+    }
+
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register('iAmBoss', { en, zh }))
+        ctx.effect(() => {
+          const tag = document.createElement('style')
+          tag.dataset.plugin = 'i-am-boss-dsh'
+          tag.textContent = css
+          document.head.appendChild(tag)
+          return () => tag.remove()
+        })
         const t = ctx.locale.bind('iAmBoss')
         ctx.slots.inject('main', () => ctx.slots.register({
           name: 'main', key: 'i-am-boss', locale: 'iAmBoss', inject: () => ({ t }),
         }, Page))
+        ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({
+          name: 'conversation.chat.assistant-actions', id: 'i-am-boss-verdict', order: 20, locale: 'iAmBoss',
+          inject: (sessionId) => ({ id: sessionId, t }),
+        }, TurnVerdict))
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
           name: 'sidebar.panellist', id: 'i-am-boss', order: 40, locale: 'iAmBoss', label: () => t('panel'),
         }, Icon))
@@ -166,6 +236,14 @@ const css = `
 .boss-actions-row summary { cursor: pointer; color: var(--dsw-alias-label-secondary); }
 .boss-log { margin: 8px 0 0; padding-left: 18px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
 .boss-note-input { flex: 1 1 200px; }
+.boss-strip {
+  width: 28px; height: 28px; padding: 6px; display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--dsw-radius-sm); background: none; cursor: pointer;
+  color: var(--dsw-alias-label-tertiary);
+}
+.boss-strip:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-secondary); }
+.boss-strip-fine:hover { color: var(--dsw-alias-state-error-primary); }
+.boss-strip-failure { color: var(--dsw-alias-label-tertiary); font-size: 13px; padding-left: 4px; }
 .boss-model { color: var(--dsw-alias-label-tertiary); }
 .boss-running { color: var(--dsw-alias-state-business-primary); }
 .boss-idle { color: var(--dsw-alias-label-secondary); }

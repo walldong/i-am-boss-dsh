@@ -31,15 +31,14 @@ export function apply(ctx) {
 function bossTool(queue, ctx) {
   return {
     name: 'boss_payroll',
-    description: '员工名册与工资体系。余额是员工的身价评分，越高越好。action: list | set_wage | pay | tip | fine（任务完成后按质量打赏 tip / 罚款 fine，note 写理由）。token 费用会自动从余额扣除。',
+    description: '员工名册与工资体系。余额是员工的身价评分，越高越好。action: list | set_wage | pay | set_quick | tip | fine。tip/fine 不给 amount 时使用该员工的单次奖惩额度。token 费用会自动从余额扣除。',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'set_wage', 'pay', 'tip', 'fine'] },
-        id: { type: 'string', description: '员工 id，即 agent id' },
+        action: { type: 'string', enum: ['list', 'set_wage', 'pay', 'set_quick', 'tip', 'fine'] },
+        id: { type: 'string', description: '员工 id，即 agent / session id' },
         period: { type: 'string', enum: ['day', 'week', 'month'] },
-        amount: { type: 'number', description: '金额（元），必须大于 0' },
-        note: { type: 'string', description: '打赏或罚款的理由，比如「修好了登录 bug」' },
+        amount: { type: 'number', description: '金额（元），必须大于 0；tip/fine 可省略，走单次额度' },
       },
       required: ['action'],
     },
@@ -75,14 +74,16 @@ function act(queue, ctx, args) {
       employee.wage = { period: args.period, amount: money(args.amount) }
     } else if (args.action === 'pay') {
       employee.balance = money(employee.balance + employee.wage.amount)
+    } else if (args.action === 'set_quick') {
+      if (!(args.amount > 0)) return { error: '单次奖惩额度要大于 0' }
+      employee.verdictAmount = money(args.amount)
     } else if (args.action === 'tip' || args.action === 'fine') {
-      if (!(args.amount > 0)) return { error: '金额要大于 0' }
-      const sign = args.action === 'tip' ? 1 : -1
-      employee.balance = money(employee.balance + sign * args.amount)
-      employee[args.action === 'tip' ? 'tipTotal' : 'fineTotal'] = money(employee[args.action === 'tip' ? 'tipTotal' : 'fineTotal'] + args.amount)
-      employee.verdicts = [...(employee.verdicts || []), {
-        at: new Date().toISOString(), kind: args.action, amount: money(args.amount), note: String(args.note || ''),
-      }].slice(-20)
+      const amount = args.amount > 0 ? money(args.amount) : employee.verdictAmount
+      if (!(amount > 0)) return { error: '金额要大于 0' }
+      const tip = args.action === 'tip'
+      employee.balance = money(employee.balance + (tip ? amount : -amount))
+      employee[tip ? 'tipTotal' : 'fineTotal'] = money(employee[tip ? 'tipTotal' : 'fineTotal'] + amount)
+      employee.verdicts = [...(employee.verdicts || []), { at: new Date().toISOString(), kind: args.action, amount }].slice(-20)
     } else {
       return { error: '未知操作' }
     }
@@ -122,7 +123,7 @@ function ensure(ledger, id, now) {
     ledger.employees[id] = {
       id, hiredAt: at, lastPaidAt: at, model: '',
       wage: { ...DEFAULT_WAGE }, balance: 0, tokenCost: 0, billed: null,
-      tipTotal: 0, fineTotal: 0, verdicts: [],
+      tipTotal: 0, fineTotal: 0, verdicts: [], verdictAmount: 1,
     }
   }
   return ledger.employees[id]
@@ -161,6 +162,7 @@ function load() {
   for (const employee of Object.values(data.employees)) {
     employee.tipTotal ??= 0
     employee.fineTotal ??= 0
+    employee.verdictAmount ??= 1
     employee.verdicts ??= []
   }
   return data
