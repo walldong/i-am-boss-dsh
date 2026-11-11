@@ -59,12 +59,12 @@
       },
       "versions": [
         {
-          "version": "1.6.0",
-          "publishTimestamp": 1794395000,
+          "version": "1.6.2",
+          "publishTimestamp": 1794395200,
           "source": {
             "type": "git",
             "url": "https://github.com/walldong/i-am-boss-dsh",
-            "commit": "699895a439e728f1ea4a9f92c9c02fa408087e3e"
+            "commit": "6260670f346696cb9dee684283bb32387cfc1afd"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.5"
