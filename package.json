@@ -1,5 +1,5 @@
 {
-  "name": "@local/i-am-boss",
+  "name": "i-am-boss-dsh",
   "version": "1.0.0",
   "private": true,
   "description": "Monitor running DeepSeek Harness agents, pay wages, and deduct token cost from each employee.",
@@ -11,6 +11,9 @@
     "./icon": "./icon.svg"
   },
   "files": ["index.js", "payroll.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg"],
+  "keywords": ["dsh", "deepseek-harness", "plugin", "agent", "payroll"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/walldong/i-am-boss-dsh.git" },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

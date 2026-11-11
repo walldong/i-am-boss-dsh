@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: '@local/i-am-boss',
+  id: 'i-am-boss-dsh',
   factory(require) {
     const React = require('react')
     const h = React.createElement
