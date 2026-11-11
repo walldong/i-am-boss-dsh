@@ -121,8 +121,8 @@ window.__ModuleLoader__.load({
                 h('b', { className: employee.balance < 0 ? 'boss-debt' : 'boss-good' }, yuan(employee.balance))),
               h('dl', { className: 'boss-stats' },
                 stat(t('wage'), `${yuan(employee.wage.amount)}${periodLabel(t, employee.wage.period)}`, employee.inherited),
-                stat(t('tipTotal'), `+${yuan(employee.tipTotal)}`, false, 'boss-good'),
-                stat(t('fineTotal'), `-${yuan(employee.fineTotal)}`, false, 'boss-debt')),
+                stat(t('tipTotal'), signed(employee.tipTotal, '+'), false, 'boss-good'),
+                stat(t('fineTotal'), signed(employee.fineTotal, '-'), false, 'boss-debt')),
               h('div', { className: 'boss-roi' },
                 h('span', null,
                   h('span', { className: 'boss-label' }, t('efficiency')), ' ',
@@ -214,6 +214,12 @@ window.__ModuleLoader__.load({
     function yuan(n) {
       const value = Number(n || 0)
       return value.toFixed(2)
+    }
+
+    /** A sign only when there is something to sign: 0.00, not -0.00. */
+    function signed(n, sign) {
+      const value = Number(n || 0)
+      return value === 0 ? '0.00' : `${sign}${value.toFixed(2)}`
     }
 
     function TipIcon() {
